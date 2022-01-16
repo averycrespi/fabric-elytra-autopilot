@@ -20,53 +20,93 @@ public class ConfigManager {
     static File configFile;
     static MinecraftClient minecraftClient;
 
-    public static void register(ElytraAutoPilot main, MinecraftClient mc)
-    {
+    public static void register(ElytraAutoPilot main, MinecraftClient mc) {
         minecraftClient = mc;
         Path configdir = FabricLoader.getInstance().getConfigDir();
         String moddir = "/elytraautopilot/config.json";
         configFile = new File(configdir + moddir);
         loadSettings(main);
     }
-    public static void createAndShowSettings()
-    {
-        //This adds all config entries to the config screen
-        //For some reason it doesn't remember the default settings afterwards
-        //Might fix it later idk
-        ConfigBuilder configBuilder = ConfigBuilder.create().setTitle(new TranslatableText("text.elytraautopilot.title")).setSavingRunnable(ConfigManager::saveSettings);
-        ConfigCategory categoryGui = configBuilder.getOrCreateCategory(new TranslatableText("text.elytraautopilot.gui"));
-        ConfigCategory categoryFlightProfile = configBuilder.getOrCreateCategory(new TranslatableText(("text.elytraautopilot.flightprofile")));
-        ConfigCategory categoryAdvanced = configBuilder.getOrCreateCategory(new TranslatableText(("text.elytraautopilot.advanced")));
+
+    public static void createAndShowSettings() {
+        // This adds all config entries to the config screen
+        // For some reason it doesn't remember the default settings afterwards
+        // Might fix it later idk
+        ConfigBuilder configBuilder = ConfigBuilder.create()
+                .setTitle(new TranslatableText("text.elytraautopilot.title"))
+                .setSavingRunnable(ConfigManager::saveSettings);
+        ConfigCategory categoryGui = configBuilder
+                .getOrCreateCategory(new TranslatableText("text.elytraautopilot.gui"));
+        ConfigCategory categoryFlightProfile = configBuilder
+                .getOrCreateCategory(new TranslatableText(("text.elytraautopilot.flightprofile")));
+        ConfigCategory categoryAdvanced = configBuilder
+                .getOrCreateCategory(new TranslatableText(("text.elytraautopilot.advanced")));
 
         ConfigEntryBuilder entryBuilder = ConfigEntryBuilder.create();
 
-        categoryGui.addEntry(entryBuilder.startBooleanToggle(new TranslatableText("text.elytraautopilot.showgui"), config.showgui).setDefaultValue(config.showgui).setSaveConsumer((x) -> config.showgui = x).build());
-        categoryGui.addEntry(entryBuilder.startIntField(new TranslatableText("text.elytraautopilot.guiX"), config.guiX).setDefaultValue(config.guiX).setSaveConsumer((x) -> config.guiX = x).build());
-        categoryGui.addEntry(entryBuilder.startIntField(new TranslatableText("text.elytraautopilot.guiY"), config.guiY).setDefaultValue(config.guiY).setSaveConsumer((y) -> config.guiY = y).build());
+        categoryGui.addEntry(
+                entryBuilder.startBooleanToggle(new TranslatableText("text.elytraautopilot.showgui"), config.showgui)
+                        .setDefaultValue(config.showgui).setSaveConsumer((x) -> config.showgui = x).build());
+        categoryGui.addEntry(entryBuilder.startIntField(new TranslatableText("text.elytraautopilot.guiX"), config.guiX)
+                .setDefaultValue(config.guiX).setSaveConsumer((x) -> config.guiX = x).build());
+        categoryGui.addEntry(entryBuilder.startIntField(new TranslatableText("text.elytraautopilot.guiY"), config.guiY)
+                .setDefaultValue(config.guiY).setSaveConsumer((y) -> config.guiY = y).build());
 
-        categoryFlightProfile.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.maxHeight"), config.maxHeight).setDefaultValue(config.maxHeight).setSaveConsumer((y) -> config.maxHeight = y).build());
-        categoryFlightProfile.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.minHeight"), config.minHeight).setDefaultValue(config.minHeight).setSaveConsumer((y) -> config.minHeight = y).build());
-        categoryFlightProfile.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.turningSpeed"), config.turningSpeed).setDefaultValue(config.turningSpeed).setSaveConsumer((x) -> config.turningSpeed = x).build());
-        categoryFlightProfile.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.takeOffPull"), config.takeOffPull).setDefaultValue(config.takeOffPull).setSaveConsumer((x) -> config.takeOffPull = x).build());
-        categoryFlightProfile.addEntry(entryBuilder.startBooleanToggle(new TranslatableText("text.elytraautopilot.autoLanding"), config.autoLanding).setDefaultValue(config.autoLanding).setSaveConsumer((x) -> config.autoLanding = x).build());
-        categoryFlightProfile.addEntry(entryBuilder.startBooleanToggle(new TranslatableText("text.elytraautopilot.riskyLanding"), config.riskyLanding).setDefaultValue(config.riskyLanding).setSaveConsumer((x) -> config.riskyLanding = x).build());
-        //categoryFlightProfile.addEntry(entryBuilder.startBooleanToggle(new TranslatableText("text.elytraautopilot.poweredFlight"), config.poweredFlight).setDefaultValue(config.poweredFlight).setSaveConsumer((x) -> config.poweredFlight = x).build());
-        categoryFlightProfile.addEntry(entryBuilder.startBooleanToggle(new TranslatableText("text.elytraautopilot.elytraHotswap"), config.elytraHotswap).setDefaultValue(config.elytraHotswap).setSaveConsumer((x) -> config.elytraHotswap = x).build());
+        categoryFlightProfile.addEntry(
+                entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.maxHeight"), config.maxHeight)
+                        .setDefaultValue(config.maxHeight).setSaveConsumer((y) -> config.maxHeight = y).build());
+        categoryFlightProfile.addEntry(
+                entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.minHeight"), config.minHeight)
+                        .setDefaultValue(config.minHeight).setSaveConsumer((y) -> config.minHeight = y).build());
+        categoryFlightProfile.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.turningSpeed"), config.turningSpeed)
+                .setDefaultValue(config.turningSpeed).setSaveConsumer((x) -> config.turningSpeed = x).build());
+        categoryFlightProfile.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.takeOffPull"), config.takeOffPull)
+                .setDefaultValue(config.takeOffPull).setSaveConsumer((x) -> config.takeOffPull = x).build());
+        categoryFlightProfile.addEntry(entryBuilder
+                .startBooleanToggle(new TranslatableText("text.elytraautopilot.autoLanding"), config.autoLanding)
+                .setDefaultValue(config.autoLanding).setSaveConsumer((x) -> config.autoLanding = x).build());
+        categoryFlightProfile.addEntry(entryBuilder
+                .startBooleanToggle(new TranslatableText("text.elytraautopilot.riskyLanding"), config.riskyLanding)
+                .setDefaultValue(config.riskyLanding).setSaveConsumer((x) -> config.riskyLanding = x).build());
+        // categoryFlightProfile.addEntry(entryBuilder.startBooleanToggle(new
+        // TranslatableText("text.elytraautopilot.poweredFlight"),
+        // config.poweredFlight).setDefaultValue(config.poweredFlight).setSaveConsumer((x)
+        // -> config.poweredFlight = x).build());
+        categoryFlightProfile.addEntry(entryBuilder
+                .startBooleanToggle(new TranslatableText("text.elytraautopilot.elytraHotswap"), config.elytraHotswap)
+                .setDefaultValue(config.elytraHotswap).setSaveConsumer((x) -> config.elytraHotswap = x).build());
 
-        categoryAdvanced.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.pullUpAngle"), config.pullUpAngle).setDefaultValue(config.pullUpAngle).setSaveConsumer((y) -> config.pullUpAngle = y).build());
-        categoryAdvanced.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.pullDownAngle"), config.pullDownAngle).setDefaultValue(config.pullDownAngle).setSaveConsumer((y) -> config.pullDownAngle = y).build());
-        categoryAdvanced.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.pullUpSpeed"), config.pullUpSpeed).setDefaultValue(config.pullUpSpeed).setSaveConsumer((y) -> config.pullUpSpeed = y).build());
-        categoryAdvanced.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.pullDownSpeed"), config.pullDownSpeed).setDefaultValue(config.pullDownSpeed).setSaveConsumer((y) -> config.pullDownSpeed = y).build());
-        categoryAdvanced.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.pullUpMinVelocity"), config.pullUpMinVelocity).setDefaultValue(config.pullUpMinVelocity).setSaveConsumer((y) -> config.pullUpMinVelocity = y).build());
-        categoryAdvanced.addEntry(entryBuilder.startDoubleField(new TranslatableText("text.elytraautopilot.pullDownMaxVelocity"), config.pullDownMaxVelocity).setDefaultValue(config.pullDownMaxVelocity).setSaveConsumer((y) -> config.pullDownMaxVelocity = y).build());
+        categoryAdvanced.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.pullUpAngle"), config.pullUpAngle)
+                .setDefaultValue(config.pullUpAngle).setSaveConsumer((y) -> config.pullUpAngle = y).build());
+        categoryAdvanced.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.pullDownAngle"), config.pullDownAngle)
+                .setDefaultValue(config.pullDownAngle).setSaveConsumer((y) -> config.pullDownAngle = y).build());
+        categoryAdvanced.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.pullUpSpeed"), config.pullUpSpeed)
+                .setDefaultValue(config.pullUpSpeed).setSaveConsumer((y) -> config.pullUpSpeed = y).build());
+        categoryAdvanced.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.pullDownSpeed"), config.pullDownSpeed)
+                .setDefaultValue(config.pullDownSpeed).setSaveConsumer((y) -> config.pullDownSpeed = y).build());
+        categoryAdvanced.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.pullUpMinVelocity"),
+                        config.pullUpMinVelocity)
+                .setDefaultValue(config.pullUpMinVelocity).setSaveConsumer((y) -> config.pullUpMinVelocity = y)
+                .build());
+        categoryAdvanced.addEntry(entryBuilder
+                .startDoubleField(new TranslatableText("text.elytraautopilot.pullDownMaxVelocity"),
+                        config.pullDownMaxVelocity)
+                .setDefaultValue(config.pullDownMaxVelocity).setSaveConsumer((y) -> config.pullDownMaxVelocity = y)
+                .build());
 
         Screen screen = configBuilder.build();
         MinecraftClient.getInstance().setScreen(screen);
     }
 
-    private static void saveSettings()
-    {
-        //Writes config values to Json
+    private static void saveSettings() {
+        // Writes config values to Json
         Gson gson = new Gson();
         String configString = gson.toJson(config);
         try {
@@ -79,10 +119,11 @@ public class ConfigManager {
             System.out.println("Error ElytraAutoPilot saving settings!");
         }
     }
+
     public static void loadSettings(ElytraAutoPilot main) {
         config = new ElytraConfig();
-        //Check if the file exists, otherwise create it
-        if (!configFile.exists() && configFile.getParentFile().mkdirs()){
+        // Check if the file exists, otherwise create it
+        if (!configFile.exists() && configFile.getParentFile().mkdirs()) {
             try {
                 if (configFile.createNewFile()) {
                     System.out.println("Created new ElytraAutoPilot config file");
@@ -90,10 +131,9 @@ public class ConfigManager {
             } catch (IOException e) {
                 System.out.println("Unable to load ElytraAutoPilot settings! Using default config");
             }
-        }
-        else {
+        } else {
             try {
-                //Kind of a weird solution but oh well
+                // Kind of a weird solution but oh well
                 Scanner scanner = new Scanner(configFile);
                 String output = "";
                 while (scanner.hasNextLine()) {
@@ -101,13 +141,13 @@ public class ConfigManager {
                     output = scanner.nextLine();
                 }
                 scanner.close();
-                //Load settings from Json
+                // Load settings from Json
                 if (!output.equals("")) {
                     Gson gson = new Gson();
                     config = gson.fromJson(output, ElytraConfig.class);
                     System.out.println("Loaded ElytraAutoPilot Settings");
-                }
-                else System.out.println("Unable to load ElytraAutoPilot settings! Using default config");
+                } else
+                    System.out.println("Unable to load ElytraAutoPilot settings! Using default config");
             } catch (IOException e) {
                 System.out.println("Unable to load ElytraAutoPilot settings! Using default config");
             }
