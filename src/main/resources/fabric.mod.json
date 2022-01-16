@@ -1,4 +1,3 @@
- 
 {
   "schemaVersion": 1,
   "id": "elytraautopilot",
@@ -6,12 +5,10 @@
 
   "name": "Elytra AutoPilot",
   "description": "Automatic elytra flight with minimal use of fireworks",
-  "authors": [
-    "LouisLOurson (Fork by TheMegax)"
-  ],
+  "authors": ["LouisLOurson (Fork by TheMegax) (Fork by Avery Crespi)"],
   "contact": {
-    "homepage": "https://github.com/TheMegax/fabric-elytra-autopilot",
-    "sources": "https://github.com/TheMegax/fabric-elytra-autopilot"
+    "homepage": "https://github.com/averycrespi/fabric-elytra-autopilot",
+    "sources": "https://github.com/averycrespi/fabric-elytra-autopilot"
   },
 
   "license": "CC0-1.0",
@@ -19,13 +16,9 @@
 
   "environment": "*",
   "entrypoints": {
-    "main": [
-      "net.elytraautopilot.ElytraAutoPilot"
-    ]
+    "main": ["net.elytraautopilot.ElytraAutoPilot"]
   },
-  "mixins": [
-    "elytraautopilot.mixins.json"
-  ],
+  "mixins": ["elytraautopilot.mixins.json"],
 
   "depends": {
     "fabricloader": ">=0.12.12",

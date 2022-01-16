@@ -2,8 +2,11 @@
 
 **This mod requires [Fabric API](https://www.curseforge.com/minecraft/mc-mods/fabric-api).**
 ***
-This is a fork of Simonlourson's client [auto-flight mod](https://www.curseforge.com/minecraft/mc-mods/elytra-auto-flight), updated and added many additional utilities.
+This is a fork of TheMegax's [Elytra Autopilot mod](https://github.com/TheMegax/fabric-elytra-autopilot), which itself is a fork of Simonlourson's client [auto-flight mod](https://www.curseforge.com/minecraft/mc-mods/elytra-auto-flight).
 
+Changes from upstream:
+- Added `elytraHotswap` toggle to automatically swap out elytra when low on durability
+- Removed support for Minecraft 1.17
 
 ## How to use
 
