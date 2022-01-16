@@ -18,10 +18,10 @@ public class ClientCommands {
                                                 return 1;
                                             if (minecraftClient.player.isFallFlying()) { // If the player is flying
                                                 if (main.groundheight > config.minHeight) { // If above required height
-                                                    main.autoFlight = true;
+                                                    main.autoFlightEnabled = true;
                                                     main.argXpos = IntegerArgumentType.getInteger(context, "X");
                                                     main.argZpos = IntegerArgumentType.getInteger(context, "Z");
-                                                    main.isflytoActive = true;
+                                                    main.isFlyingTo = true;
                                                     context.getSource().sendFeedback(new TranslatableText(
                                                             "text.elytraautopilot.flyto", main.argXpos, main.argZpos)
                                                                     .formatted(Formatting.GREEN));
@@ -47,7 +47,7 @@ public class ClientCommands {
                                         .executes(context -> { // With coordinates
                                             main.argXpos = IntegerArgumentType.getInteger(context, "X");
                                             main.argZpos = IntegerArgumentType.getInteger(context, "Z");
-                                            main.isChained = true; // Chains fly-to command
+                                            main.shouldFlyToAfterTakeoff = true; // Chains fly-to command
                                             main.takeoff();
                                             return 1;
                                         })))
