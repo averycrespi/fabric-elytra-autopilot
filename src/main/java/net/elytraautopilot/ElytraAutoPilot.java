@@ -168,6 +168,35 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
+    public void useFireworkDuringTakeoff() {
+        if (!isTakingOff) {
+            return;
+        }
+
+        PlayerEntity player = minecraftClient.player;
+        if (player == null) {
+            return;
+        }
+
+        Item mainHandItem = player.getMainHandStack().getItem();
+        Item offHandItem = player.getOffHandStack().getItem();
+        boolean hasFirework = (mainHandItem.toString().equals("firework_rocket")
+                || offHandItem.toString().equals("firework_rocket"));
+        if (!hasFirework) {
+            isTakingOff = false;
+
+            minecraftClient.options.keyUse.setPressed(false);
+            minecraftClient.options.keyJump.setPressed(false);
+
+            player.sendMessage(
+                    new TranslatableText("text.elytraautopilot.takeoffAbort.noFirework").formatted(Formatting.RED),
+                    true);
+            return;
+        }
+
+        minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
+    }
+
     public void takeoff() {
         PlayerEntity player = minecraftClient.player;
         if (player == null) {
@@ -184,24 +213,11 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             return;
         }
 
-        // If we're not flying, start flying
-        if (!player.isFallFlying())
+        if (!player.isFallFlying()) {
             minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
+        }
 
-        Item itemMain = player.getMainHandStack().getItem();
-        Item itemOff = player.getOffHandStack().getItem();
-        boolean hasFirework = (itemMain.toString().equals("firework_rocket")
-                || itemOff.toString().equals("firework_rocket"));
-        if (!hasFirework) {
-            minecraftClient.options.keyUse.setPressed(false);
-            minecraftClient.options.keyJump.setPressed(false);
-            isTakingOff = false;
-            player.sendMessage(
-                    new TranslatableText("text.elytraautopilot.takeoffAbort.noFirework").formatted(Formatting.RED),
-                    true);
-        } else
-            // If we have rockets & the angle and velocity are correct, use a rocket
-            minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
+        useFireworkDuringTakeoff();
     }
 
     private void onScreenTick() // Once every screen frame
