@@ -135,8 +135,9 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             }
         }
 
-        doTakeoffCooldown = true;
+        // Initiate a cooldown so the player has enough time to jump
         minecraftClient.options.keyJump.setPressed(true);
+        doTakeoffCooldown = true;
     }
 
     public void endTakeoff() {
@@ -197,14 +198,13 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
     }
 
-    public void takeoff() {
-        PlayerEntity player = minecraftClient.player;
-        if (player == null) {
+    public void doTakeoffTick() {
+        if (!isTakingOff) {
             return;
         }
 
-        if (!isTakingOff) {
-            startTakeOff();
+        PlayerEntity player = minecraftClient.player;
+        if (player == null) {
             return;
         }
 
@@ -444,10 +444,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 isTakingOff = true;
             }
         }
-
-        if (isTakingOff) {
-            takeoff();
-        }
+        doTakeoffTick();
 
         if (showHud) {
             computeVelocity();
