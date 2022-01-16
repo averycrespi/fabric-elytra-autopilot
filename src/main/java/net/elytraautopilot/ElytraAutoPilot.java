@@ -90,13 +90,16 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         initConfig();
     }
 
-    public void startTakeOff() {
-        if (isTakingOff) {
+    /**
+     * Start the takeoff sequence.
+     */
+    public void startTakeoff() {
+        PlayerEntity player = minecraftClient.player;
+        if (player == null) {
             return;
         }
 
-        PlayerEntity player = minecraftClient.player;
-        if (player == null) {
+        if (isTakingOff) {
             return;
         }
 
@@ -140,27 +143,30 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         doTakeoffCooldown = true;
     }
 
-    public void endTakeoff() {
-        if (!isTakingOff) {
-            return;
-        }
-
+    /**
+     * End the takeoff sequence and transition to auto-flight.
+     *
+     * Optionally, also start flying to a target.
+     */
+    private void endTakeoff() {
         PlayerEntity player = minecraftClient.player;
         if (player == null) {
             return;
         }
 
+        if (!isTakingOff) {
+            return;
+        }
+
         isTakingOff = false;
         autoFlightEnabled = true;
-
         minecraftClient.options.keyUse.setPressed(false);
         minecraftClient.options.keyJump.setPressed(false);
         pitchMod = 3f;
 
         if (shouldFlyToAfterTakeoff) {
-            isFlyingTo = true;
             shouldFlyToAfterTakeoff = false;
-
+            isFlyingTo = true;
             minecraftClient.inGameHud.addChatMessage(
                     MessageType.SYSTEM,
                     new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos)
@@ -169,42 +175,62 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    public void useFireworkDuringTakeoff() {
-        if (!isTakingOff) {
-            return;
-        }
-
+    /**
+     * Use a firework rocket during the takeoff sequence.
+     *
+     * If the player is not holding a firework, abort the takeoff sequence.
+     */
+    private void useFireworkDuringTakeoff() {
         PlayerEntity player = minecraftClient.player;
         if (player == null) {
             return;
         }
 
+        if (!isTakingOff) {
+            return;
+        }
+
         Item mainHandItem = player.getMainHandStack().getItem();
         Item offHandItem = player.getOffHandStack().getItem();
-        boolean hasFirework = (mainHandItem.toString().equals("firework_rocket")
+        boolean isHoldingFirework = (mainHandItem.toString().equals("firework_rocket")
                 || offHandItem.toString().equals("firework_rocket"));
-        if (!hasFirework) {
+        if (!isHoldingFirework) {
             isTakingOff = false;
-
             minecraftClient.options.keyUse.setPressed(false);
             minecraftClient.options.keyJump.setPressed(false);
-
             player.sendMessage(
                     new TranslatableText("text.elytraautopilot.takeoffAbort.noFirework").formatted(Formatting.RED),
                     true);
             return;
         }
 
+        // Only use a fiework if the player's vertical velocity is low enough and the
+        // player is looking straight up
         minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
     }
 
-    public void doTakeoffTick() {
-        if (!isTakingOff) {
+    /**
+     * Update the takeoff sequence.
+     *
+     * This method should be called every client tick.
+     */
+    private void updateTakeoff() {
+        PlayerEntity player = minecraftClient.player;
+        if (player == null) {
             return;
         }
 
-        PlayerEntity player = minecraftClient.player;
-        if (player == null) {
+        if (doTakeoffCooldown) {
+            if (takeoffCooldown < 5) {
+                takeoffCooldown++;
+            } else {
+                takeoffCooldown = 0;
+                doTakeoffCooldown = false;
+                isTakingOff = true;
+            }
+        }
+
+        if (!isTakingOff) {
             return;
         }
 
@@ -213,6 +239,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             return;
         }
 
+        // TODO: do we need this?
         if (!player.isFallFlying()) {
             minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
         }
@@ -435,16 +462,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
         keybindingWasPressedOnPreviousTick = keyBinding.isPressed();
 
-        if (doTakeoffCooldown) {
-            if (takeoffCooldown < 5)
-                takeoffCooldown++;
-            if (takeoffCooldown == 5) {
-                takeoffCooldown = 0;
-                doTakeoffCooldown = false;
-                isTakingOff = true;
-            }
-        }
-        doTakeoffTick();
+        updateTakeoff();
 
         if (showHud) {
             computeVelocity();

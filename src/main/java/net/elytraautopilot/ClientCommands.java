@@ -49,11 +49,11 @@ public class ClientCommands {
                                             main.argXpos = IntegerArgumentType.getInteger(context, "X");
                                             main.argZpos = IntegerArgumentType.getInteger(context, "Z");
                                             main.shouldFlyToAfterTakeoff = true; // Chains fly-to command
-                                            main.startTakeOff();
+                                            main.startTakeoff();
                                             return 1;
                                         })))
                         .executes(context -> { // Without coordinates
-                            main.startTakeOff();
+                            main.startTakeoff();
                             return 1;
                         }));
     }
