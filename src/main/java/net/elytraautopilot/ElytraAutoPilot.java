@@ -139,6 +139,35 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         minecraftClient.options.keyJump.setPressed(true);
     }
 
+    public void endTakeoff() {
+        if (!isTakingOff) {
+            return;
+        }
+
+        PlayerEntity player = minecraftClient.player;
+        if (player == null) {
+            return;
+        }
+
+        isTakingOff = false;
+        autoFlightEnabled = true;
+
+        minecraftClient.options.keyUse.setPressed(false);
+        minecraftClient.options.keyJump.setPressed(false);
+        pitchMod = 3f;
+
+        if (shouldFlyToAfterTakeoff) {
+            isFlyingTo = true;
+            shouldFlyToAfterTakeoff = false;
+
+            minecraftClient.inGameHud.addChatMessage(
+                    MessageType.SYSTEM,
+                    new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos)
+                            .formatted(Formatting.GREEN),
+                    player.getUuid());
+        }
+    }
+
     public void takeoff() {
         PlayerEntity player = minecraftClient.player;
         if (player == null) {
@@ -150,21 +179,8 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             return;
         }
 
-        // If we're high enough, transition to auto flight and return
         if (distanceToGround > config.minHeight) {
-            isTakingOff = false;
-            minecraftClient.options.keyUse.setPressed(false);
-            minecraftClient.options.keyJump.setPressed(false);
-            autoFlightEnabled = true;
-            pitchMod = 3f;
-            if (shouldFlyToAfterTakeoff) {
-                isFlyingTo = true;
-                shouldFlyToAfterTakeoff = false;
-                minecraftClient.inGameHud.addChatMessage(MessageType.SYSTEM,
-                        new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos)
-                                .formatted(Formatting.GREEN),
-                        player.getUuid());
-            }
+            endTakeoff();
             return;
         }
 
