@@ -21,6 +21,8 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.system.CallbackI.V;
+
 import net.minecraft.world.World;
 
 import java.util.ArrayList;
@@ -46,10 +48,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private boolean isTakingOff;
     private double pitchMod = 1f;
 
-    private Vec3d previousPosition;
-    private double currentVelocity;
-    private double currentHorizontalVelocity;
-
     public boolean isDescending;
     public boolean isPullingUp;
     public boolean isPullingDown;
@@ -64,30 +62,50 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private boolean isLanding = false;
 
     private int _tick = 0;
-    private int _velocityIndex = -1;
+
     private double distanceToTarget = 0f;
     public double distanceToGround;
+
+    private Vec3d previousPosition;
+    private double currentVelocity;
+    private double currentHorizontalVelocity;
+
+    private int velocityIndex = -1;
     private List<Double> velocityList = new ArrayList<>();
-    private List<Double> velocityListHorizontal = new ArrayList<>();
+    private List<Double> horizontalVelocityList = new ArrayList<>();
+    private double averageVelocity = 0f;
+    private double averageHorizontalVelocity = 0f;
 
     public BaseText[] hudString;
 
     @Override
+    public void onInitializeClient() {
+        System.out.println("Client ElytraAutoPilot active");
+    }
+
+    @Override
     public void onInitialize() {
         keyBinding = new KeyBinding(
-                "key.elytraautopilot.toggle", // The translation key of the keybinding's name
-                InputUtil.Type.KEYSYM, // The type of the keybinding, KEYSYM for keyboard, MOUSE for mouse.
-                GLFW.GLFW_KEY_R, // The keycode of the key
-                "text.elytraautopilot.title" // The translation key of the keybinding's category.
-        );
-
+                "key.elytraautopilot.toggle",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_R,
+                "text.elytraautopilot.title");
         KeyBindingHelper.registerKeyBinding(keyBinding);
-
         keybindingWasPressedOnPreviousTick = false;
+
         HudRenderCallback.EVENT.register((matrixStack, tickDelta) -> ElytraAutoPilot.this.onScreenTick());
         ClientTickEvents.END_CLIENT_TICK.register(e -> this.onClientTick());
+
         ElytraAutoPilot.instance = this;
         initConfig();
+    }
+
+    private void initConfig() {
+        if (minecraftClient == null) {
+            minecraftClient = MinecraftClient.getInstance();
+            ConfigManager.register(main, minecraftClient);
+            ClientCommands.register(main, config, minecraftClient);
+        }
     }
 
     /**
@@ -197,40 +215,9 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             return;
         }
 
-        // Only use a fiework if the player's vertical velocity is low enough and the
-        // player is looking straight up
+        // Only use a fiework if the player's velocity is low enough and the player is
+        // looking straight up
         minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
-    }
-
-    /**
-     * Update the takeoff sequence during a client tick.
-     */
-    private void updateTakeoffDuringClientTick(PlayerEntity player) {
-        if (doTakeoffCooldown) {
-            if (takeoffCooldown < 5) {
-                takeoffCooldown++;
-            } else {
-                takeoffCooldown = 0;
-                doTakeoffCooldown = false;
-                isTakingOff = true;
-            }
-        }
-
-        if (!isTakingOff) {
-            return;
-        }
-
-        if (distanceToGround > config.minHeight) {
-            endTakeoff(player);
-            return;
-        }
-
-        // TODO: do we need this?
-        if (!player.isFallFlying()) {
-            minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
-        }
-
-        useFireworkDuringTakeoff(player);
     }
 
     private void onScreenTick() // Once every screen frame
@@ -363,196 +350,160 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    private void onClientTick() // 20 times a second, before first screen tick
-    {
+    /**
+     * Runs 20 times per second, before the first screen tick.
+     */
+    private void onClientTick() {
         _tick++;
-        double velMod;
 
+        // TODO: do we need this?
         initConfig(); // Backup check
 
         PlayerEntity player = minecraftClient.player;
-
         if (player == null) {
+            // TODO: do we need these?
             autoFlightEnabled = false;
             isTakingOff = false;
             return;
         }
 
-        if (player.isFallFlying())
+        if (player.isFallFlying()) {
             showHud = true;
-        else {
+        } else {
             showHud = false;
             autoFlightEnabled = false;
             distanceToGround = -1f;
         }
 
-        double altitude;
-        if (autoFlightEnabled) {
-            altitude = player.getPos().y;
+        updateAutoFlightDuringClientTick(player);
+        handleKeybindingDuringClientTick(player);
+        updateTakeoffDuringClientTick(player);
 
-            if (player.isTouchingWater() || player.isInLava()) {
-                isFlyingTo = false;
-                isLanding = false;
-                autoFlightEnabled = false;
-                return;
+        if (showHud) {
+            updateCurrentVelocity();
+            if (_tick >= 20) {
+                _tick = 0;
+                updateVelocityList(player);
+                updateAverageVelocity();
+                updateDistanceToGround(player);
+                updateHudString(player);
             }
+        } else {
+            resetHudMetrics();
+        }
+    }
 
-            if (isDescending) {
-                isPullingUp = false;
-                isPullingDown = true;
-                // If we're over (or nearly over) the max height, allow a faster descent before
-                // starting to pull up
-                if (altitude > config.maxHeight) { // TODO fix this maybe
-                    velHigh = 0.3f;
-                } else if (altitude > config.maxHeight - 10) {
-                    velLow = 0.28475f;
-                }
-                velMod = Math.max(velHigh, velLow);
-                if (currentVelocity >= config.pullDownMaxVelocity + velMod) {
-                    isDescending = false;
-                    isPullingDown = false;
-                    isPullingUp = true;
-                    pitchMod = 1f;
-                }
-            } else {
-                // Precondition: we're not descending
-                velHigh = 0f;
-                velLow = 0f;
-                isPullingUp = true;
+    /**
+     * Update auto-flight during a client tick.
+     */
+    private void updateAutoFlightDuringClientTick(PlayerEntity player) {
+        if (!autoFlightEnabled) {
+            return;
+        }
+
+        // TODO: move this into main client tick?
+        if (player.isTouchingWater() || player.isInLava()) {
+            isFlyingTo = false;
+            isLanding = false;
+            autoFlightEnabled = false;
+            return;
+        }
+
+        double altitude = player.getPos().y;
+        if (isDescending) {
+            isPullingUp = false;
+            isPullingDown = true;
+            // If we're over (or nearly over) the max height, allow a faster descent before
+            // starting to pull up
+            if (altitude > config.maxHeight) { // TODO fix this maybe
+                velHigh = 0.3f;
+            } else if (altitude > config.maxHeight - 10) {
+                velLow = 0.28475f;
+            }
+            double velMod = Math.max(velHigh, velLow);
+            if (currentVelocity >= config.pullDownMaxVelocity + velMod) {
+                isDescending = false;
                 isPullingDown = false;
+                isPullingUp = true;
+                pitchMod = 1f;
+            }
+        } else {
+            // Precondition: we're not descending
+            velHigh = 0f;
+            velLow = 0f;
+            isPullingUp = true;
+            isPullingDown = false;
 
-                // If our velocity is too low or we're nearly too high, start descending
-                if (currentVelocity <= config.pullUpMinVelocity || altitude > config.maxHeight - 10) {
-                    isDescending = true;
-                    isPullingDown = true;
-                    isPullingUp = false;
-                }
+            // If our velocity is too low or we're nearly too high, start descending
+            if (currentVelocity <= config.pullUpMinVelocity || altitude > config.maxHeight - 10) {
+                isDescending = true;
+                isPullingDown = true;
+                isPullingUp = false;
+            }
+        }
+    }
+
+    /**
+     * Update the takeoff sequence during a client tick.
+     */
+    private void updateTakeoffDuringClientTick(PlayerEntity player) {
+        // This cooldown gives the player time to jump before we start taking off
+        if (doTakeoffCooldown) {
+            if (takeoffCooldown < 5) {
+                takeoffCooldown++;
+            } else {
+                takeoffCooldown = 0;
+                doTakeoffCooldown = false;
+                isTakingOff = true;
             }
         }
 
+        if (!isTakingOff) {
+            return;
+        }
+
+        if (distanceToGround > config.minHeight) {
+            endTakeoff(player);
+            return;
+        }
+
+        // TODO: do we need this?
+        if (!player.isFallFlying()) {
+            minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
+        }
+
+        useFireworkDuringTakeoff(player);
+    }
+
+    /**
+     * Handle the keybinding during a client tick.
+     *
+     * If the player presses the keybinding while flying, we toggle auto-flight.
+     * Otherwise, we show the configuration menu.
+     */
+    private void handleKeybindingDuringClientTick(PlayerEntity player) {
         if (!keybindingWasPressedOnPreviousTick && keyBinding.isPressed()) {
             if (player.isFallFlying()) {
-                if (!autoFlightEnabled && distanceToGround < config.minHeight) {
+                if (autoFlightEnabled) {
+                    autoFlightEnabled = false;
+                } else if (distanceToGround < config.minHeight) {
                     player.sendMessage(new TranslatableText("text.elytraautopilot.autoFlightFail.tooLow")
                             .formatted(Formatting.RED), true);
                 } else {
-                    // If the player is flying an elytra, we start the auto flight
-                    autoFlightEnabled = !autoFlightEnabled;
-                    if (autoFlightEnabled)
-                        isDescending = true;
+                    autoFlightEnabled = true;
+                    isDescending = true;
                 }
             } else {
-                // Otherwise, we open the settings
                 ConfigManager.createAndShowSettings();
             }
         }
         keybindingWasPressedOnPreviousTick = keyBinding.isPressed();
-
-        updateTakeoffDuringClientTick(player);
-
-        if (showHud) {
-            computeVelocity();
-
-            altitude = player.getPos().y;
-            double avgVelocity = 0f;
-            double avgHorizontalVelocity = 0f;
-
-            // Update the HUD every 20 ticks
-            if (_tick >= 20) {
-                _velocityIndex++;
-                if (_velocityIndex >= 60)
-                    _velocityIndex = 0;
-                if (velocityList.size() < 60) {
-                    velocityList.add(currentVelocity);
-                    velocityListHorizontal.add(currentHorizontalVelocity);
-                } else {
-                    velocityList.set(_velocityIndex, currentVelocity);
-                    velocityListHorizontal.set(_velocityIndex, currentHorizontalVelocity);
-                }
-
-                World world = player.world;
-                int l = world.getBottomY();
-                Vec3d clientPos = player.getPos();
-                if (!player.world.isChunkLoaded((int) clientPos.getX(), (int) clientPos.getZ())) {
-                    distanceToGround = -1f;
-                } else {
-                    for (double i = clientPos.getY(); i > l; i--) {
-                        BlockPos blockPos = new BlockPos(clientPos.getX(), i, clientPos.getZ());
-                        if (world.getBlockState(blockPos).isSolidBlock(world, blockPos)) {
-                            distanceToGround = clientPos.getY() - i;
-                            break;
-                        } else
-                            distanceToGround = -1f;
-                    }
-                }
-
-                _tick = 0;
-            }
-            if (velocityList.size() >= 5) {
-                avgVelocity = velocityList.stream().mapToDouble(val -> val).average().orElse(0.0);
-                avgHorizontalVelocity = velocityListHorizontal.stream().mapToDouble(val -> val).average().orElse(0.0);
-            }
-
-            // Render the HUD string
-            if (hudString == null)
-                hudString = new BaseText[9];
-            if (!config.showgui || minecraftClient.options.debugEnabled) { // TODO make this more colorful
-                hudString[0] = new LiteralText("");
-                hudString[1] = new LiteralText("");
-                hudString[2] = new LiteralText("");
-                hudString[3] = new LiteralText("");
-                hudString[4] = new LiteralText("");
-                hudString[5] = new LiteralText("");
-                hudString[6] = new LiteralText("");
-                hudString[7] = new LiteralText("");
-                hudString[8] = new LiteralText("");
-                return;
-            }
-            hudString[0] = (BaseText) new TranslatableText("text.elytraautopilot.hud.toggleAutoFlight")
-                    .append(new TranslatableText(
-                            autoFlightEnabled ? "text.elytraautopilot.hud.true" : "text.elytraautopilot.hud.false"));
-
-            hudString[1] = new TranslatableText("text.elytraautopilot.hud.altitude", String.format("%.2f", altitude));
-            hudString[2] = new TranslatableText("text.elytraautopilot.hud.heightFromGround",
-                    (distanceToGround == -1f ? "???" : String.format("%.2f", distanceToGround)));
-
-            hudString[3] = new TranslatableText("text.elytraautopilot.hud.speed",
-                    String.format("%.2f", currentVelocity * 20));
-            if (avgVelocity == 0f) {
-                hudString[4] = new TranslatableText("text.elytraautopilot.hud.calculating");
-                hudString[5] = new LiteralText("");
-            } else {
-                hudString[4] = new TranslatableText("text.elytraautopilot.hud.avgSpeed",
-                        String.format("%.2f", avgVelocity * 20));
-                hudString[5] = new TranslatableText("text.elytraautopilot.hud.avgHSpeed",
-                        String.format("%.2f", avgHorizontalVelocity * 20));
-            }
-            if (isFlyingTo) {
-                hudString[6] = new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos);
-                if (distanceToTarget != 0f) {
-                    hudString[7] = new TranslatableText("text.elytraautopilot.hud.eta",
-                            String.format("%.1f", distanceToTarget / (avgHorizontalVelocity * 20)));
-                }
-                hudString[8] = (BaseText) new TranslatableText("text.elytraautopilot.hud.autoLand")
-                        .append(new TranslatableText(config.autoLanding ? "text.elytraautopilot.hud.enabled"
-                                : "text.elytraautopilot.hud.disabled"));
-                if (isLanding) {
-                    hudString[7] = new TranslatableText("text.elytraautopilot.hud.landing");
-                }
-            } else {
-                hudString[6] = new LiteralText("");
-                hudString[7] = new LiteralText("");
-                hudString[8] = new LiteralText("");
-            }
-        } else {
-            // Precondition: HUD is hidden
-            velocityList.clear();
-            velocityListHorizontal.clear();
-            previousPosition = null;
-        }
     }
 
-    private void computeVelocity() {
+    /**
+     * Update the player's current velocity.
+     */
+    private void updateCurrentVelocity() {
         Vec3d newPosition;
         PlayerEntity player = minecraftClient.player;
         if (player != null && !(minecraftClient.isPaused() && minecraftClient.isInSingleplayer())) {
@@ -571,12 +522,124 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    private void initConfig() {
-        if (minecraftClient == null) {
-            minecraftClient = MinecraftClient.getInstance();
-            ConfigManager.register(main, minecraftClient);
-            ClientCommands.register(main, config, minecraftClient);
+    /**
+     * Update the list of player velocities.
+     */
+    private void updateVelocityList(PlayerEntity player) {
+        velocityIndex = (velocityIndex + 1) % 60;
+        if (velocityList.size() < 60) {
+            velocityList.add(currentVelocity);
+            horizontalVelocityList.add(currentHorizontalVelocity);
+        } else {
+            velocityList.set(velocityIndex, currentVelocity);
+            horizontalVelocityList.set(velocityIndex, currentHorizontalVelocity);
         }
+    }
+
+    /**
+     * Update the player's average velocity.
+     */
+    private void updateAverageVelocity() {
+        if (velocityList.size() >= 5) {
+            averageVelocity = velocityList.stream().mapToDouble(val -> val).average().orElse(0.0);
+            averageHorizontalVelocity = horizontalVelocityList.stream().mapToDouble(val -> val).average().orElse(0.0);
+        }
+    }
+
+    /**
+     * Update the player's distance to the ground.
+     */
+    private void updateDistanceToGround(PlayerEntity player) {
+        World world = player.world;
+        Vec3d clientPos = player.getPos();
+        double clientY = clientPos.getY();
+        double bottomY = (double) world.getBottomY();
+        if (!player.world.isChunkLoaded((int) clientPos.getX(), (int) clientPos.getZ())) {
+            distanceToGround = -1f;
+        } else {
+            for (double y = clientY; y > bottomY; y--) {
+                BlockPos blockPos = new BlockPos(clientPos.getX(), y, clientPos.getZ());
+                if (world.getBlockState(blockPos).isSolidBlock(world, blockPos)) {
+                    distanceToGround = clientY - y;
+                    return;
+                } else {
+                    // TODO: refactor this to be less weird?
+                    distanceToGround = -1f;
+                }
+            }
+        }
+    }
+
+    /**
+     * Update the HUD string.
+     */
+    private void updateHudString(PlayerEntity player) {
+        if (hudString == null) {
+            hudString = new BaseText[9];
+        }
+
+        if (!config.showgui || minecraftClient.options.debugEnabled) { // TODO make this more colorful
+            hudString[0] = new LiteralText("");
+            hudString[1] = new LiteralText("");
+            hudString[2] = new LiteralText("");
+            hudString[3] = new LiteralText("");
+            hudString[4] = new LiteralText("");
+            hudString[5] = new LiteralText("");
+            hudString[6] = new LiteralText("");
+            hudString[7] = new LiteralText("");
+            hudString[8] = new LiteralText("");
+            return;
+        }
+
+        hudString[0] = (BaseText) new TranslatableText("text.elytraautopilot.hud.toggleAutoFlight")
+                .append(new TranslatableText(
+                        autoFlightEnabled ? "text.elytraautopilot.hud.true" : "text.elytraautopilot.hud.false"));
+
+        hudString[1] = new TranslatableText("text.elytraautopilot.hud.altitude",
+                String.format("%.2f", player.getPos().y));
+
+        hudString[2] = new TranslatableText("text.elytraautopilot.hud.heightFromGround",
+                (distanceToGround == -1f ? "???" : String.format("%.2f", distanceToGround)));
+
+        hudString[3] = new TranslatableText("text.elytraautopilot.hud.speed",
+                String.format("%.2f", currentVelocity * 20));
+
+        if (averageVelocity == 0f) {
+            hudString[4] = new TranslatableText("text.elytraautopilot.hud.calculating");
+            hudString[5] = new LiteralText("");
+        } else {
+            hudString[4] = new TranslatableText("text.elytraautopilot.hud.avgSpeed",
+                    String.format("%.2f", averageVelocity * 20));
+            hudString[5] = new TranslatableText("text.elytraautopilot.hud.avgHSpeed",
+                    String.format("%.2f", averageHorizontalVelocity * 20));
+        }
+
+        if (isFlyingTo) {
+            hudString[6] = new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos);
+            if (distanceToTarget != 0f) {
+                hudString[7] = new TranslatableText("text.elytraautopilot.hud.eta",
+                        String.format("%.1f", distanceToTarget / (averageHorizontalVelocity * 20)));
+            }
+            hudString[8] = (BaseText) new TranslatableText("text.elytraautopilot.hud.autoLand")
+                    .append(new TranslatableText(config.autoLanding ? "text.elytraautopilot.hud.enabled"
+                            : "text.elytraautopilot.hud.disabled"));
+            if (isLanding) {
+                hudString[7] = new TranslatableText("text.elytraautopilot.hud.landing");
+            }
+        } else {
+            hudString[6] = new LiteralText("");
+            hudString[7] = new LiteralText("");
+            hudString[8] = new LiteralText("");
+        }
+    }
+
+    /**
+     * Reset all metric data used in the HUD.
+     */
+    private void resetHudMetrics() {
+        velocityList.clear();
+        horizontalVelocityList.clear();
+        previousPosition = null;
     }
 
     private void smoothLanding(PlayerEntity player, double speedMod) {
@@ -593,8 +656,4 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             player.setPitch(90f);
     }
 
-    @Override
-    public void onInitializeClient() {
-        System.out.println("Client ElytraAutoPilot active");
-    }
 }
