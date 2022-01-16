@@ -148,20 +148,18 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
      *
      * Optionally, also start flying to a target.
      */
-    private void endTakeoff() {
-        PlayerEntity player = minecraftClient.player;
-        if (player == null) {
-            return;
-        }
-
+    private void endTakeoff(PlayerEntity player) {
         if (!isTakingOff) {
             return;
         }
 
         isTakingOff = false;
         autoFlightEnabled = true;
+
         minecraftClient.options.keyUse.setPressed(false);
         minecraftClient.options.keyJump.setPressed(false);
+
+        // TODO: why do we adjust pitch here?
         pitchMod = 3f;
 
         if (shouldFlyToAfterTakeoff) {
@@ -180,12 +178,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
      *
      * If the player is not holding a firework, abort the takeoff sequence.
      */
-    private void useFireworkDuringTakeoff() {
-        PlayerEntity player = minecraftClient.player;
-        if (player == null) {
-            return;
-        }
-
+    private void useFireworkDuringTakeoff(PlayerEntity player) {
         if (!isTakingOff) {
             return;
         }
@@ -210,16 +203,9 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     }
 
     /**
-     * Update the takeoff sequence.
-     *
-     * This method should be called every client tick.
+     * Update the takeoff sequence during a client tick.
      */
-    private void updateTakeoff() {
-        PlayerEntity player = minecraftClient.player;
-        if (player == null) {
-            return;
-        }
-
+    private void updateTakeoffDuringClientTick(PlayerEntity player) {
         if (doTakeoffCooldown) {
             if (takeoffCooldown < 5) {
                 takeoffCooldown++;
@@ -235,7 +221,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
 
         if (distanceToGround > config.minHeight) {
-            endTakeoff();
+            endTakeoff(player);
             return;
         }
 
@@ -244,7 +230,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
         }
 
-        useFireworkDuringTakeoff();
+        useFireworkDuringTakeoff(player);
     }
 
     private void onScreenTick() // Once every screen frame
@@ -462,7 +448,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
         keybindingWasPressedOnPreviousTick = keyBinding.isPressed();
 
-        updateTakeoff();
+        updateTakeoffDuringClientTick(player);
 
         if (showHud) {
             computeVelocity();
