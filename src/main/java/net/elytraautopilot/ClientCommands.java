@@ -17,7 +17,8 @@ public class ClientCommands {
                                             if (minecraftClient.player == null)
                                                 return 1;
                                             if (minecraftClient.player.isFallFlying()) { // If the player is flying
-                                                if (main.groundheight > config.minHeight) { // If above required height
+                                                if (main.distanceToGround > config.minHeight) { // If above required
+                                                                                                // height
                                                     main.autoFlightEnabled = true;
                                                     main.argXpos = IntegerArgumentType.getInteger(context, "X");
                                                     main.argZpos = IntegerArgumentType.getInteger(context, "Z");
@@ -48,11 +49,11 @@ public class ClientCommands {
                                             main.argXpos = IntegerArgumentType.getInteger(context, "X");
                                             main.argZpos = IntegerArgumentType.getInteger(context, "Z");
                                             main.shouldFlyToAfterTakeoff = true; // Chains fly-to command
-                                            main.takeoff();
+                                            main.startTakeOff();
                                             return 1;
                                         })))
                         .executes(context -> { // Without coordinates
-                            main.takeoff();
+                            main.startTakeOff();
                             return 1;
                         }));
     }

@@ -66,7 +66,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private int _tick = 0;
     private int _velocityIndex = -1;
     private double distanceToTarget = 0f;
-    public double groundheight;
+    public double distanceToGround;
     private List<Double> velocityList = new ArrayList<>();
     private List<Double> velocityListHorizontal = new ArrayList<>();
 
@@ -90,95 +90,102 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         initConfig();
     }
 
+    public void startTakeOff() {
+        if (isTakingOff) {
+            return;
+        }
+
+        PlayerEntity player = minecraftClient.player;
+        if (player == null) {
+            return;
+        }
+
+        Item chestItem = player.getInventory().armor.get(2).getItem();
+        int elytraDurability = player.getInventory().armor.get(2).getMaxDamage()
+                - player.getInventory().armor.get(2).getDamage();
+        if (!chestItem.toString().equals("elytra")) {
+            player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.noElytraEquipped")
+                    .formatted(Formatting.RED), true);
+            return;
+        }
+        if (elytraDurability == 1) {
+            player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.elytraBroken")
+                    .formatted(Formatting.RED), true);
+            return;
+        }
+
+        Item mainHandItem = player.getMainHandStack().getItem();
+        Item offHandItem = player.getOffHandStack().getItem();
+        if (!mainHandItem.toString().equals("firework_rocket") && !offHandItem.toString().equals("firework_rocket")) {
+            player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.fireworkRequired")
+                    .formatted(Formatting.RED), true);
+            return;
+        }
+
+        World world = player.world;
+        Vec3d clientPos = player.getPos();
+        double clientY = clientPos.getY();
+        double topY = world.getTopY();
+        for (double y = clientY; y < topY; y++) {
+            BlockPos blockPos = new BlockPos(clientPos.getX(), y + 2, clientPos.getZ());
+            if (!world.getBlockState(blockPos).isAir()) {
+                player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.clearSkyNeeded")
+                        .formatted(Formatting.RED), true);
+                return;
+            }
+        }
+
+        doTakeoffCooldown = true;
+        minecraftClient.options.keyJump.setPressed(true);
+    }
+
     public void takeoff() {
         PlayerEntity player = minecraftClient.player;
+        if (player == null) {
+            return;
+        }
 
-        // If we're not already taking off, start takeoff cooldown and return
         if (!isTakingOff) {
-            if (player != null) {
-                Item itemMain = player.getMainHandStack().getItem();
-                Item itemOff = player.getOffHandStack().getItem();
-                Item itemChest = player.getInventory().armor.get(2).getItem();
-                int elytraDamage = player.getInventory().armor.get(2).getMaxDamage()
-                        - player.getInventory().armor.get(2).getDamage();
-                if (!itemChest.toString().equals("elytra")) {
-                    player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.noElytraEquipped")
-                            .formatted(Formatting.RED), true);
-                    return;
-                }
-                if (elytraDamage == 1) {
-                    player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.elytraBroken")
-                            .formatted(Formatting.RED), true);
-                    return;
-                }
+            startTakeOff();
+            return;
+        }
 
-                if (!itemMain.toString().equals("firework_rocket")) {
-                    if (!itemOff.toString().equals("firework_rocket")) {
-                        player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.fireworkRequired")
-                                .formatted(Formatting.RED), true);
-                        return;
-                    }
-                }
-
-                World world = player.world;
-                Vec3d clientPos = player.getPos();
-                int topY = world.getTopY();
-                int n = 2;
-                double clientY = clientPos.getY();
-                for (double i = clientY; i < topY; i++) {
-                    BlockPos blockPos = new BlockPos(clientPos.getX(), clientPos.getY() + n, clientPos.getZ());
-                    if (!world.getBlockState(blockPos).isAir()) {
-                        player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.clearSkyNeeded")
-                                .formatted(Formatting.RED), true);
-                        return;
-                    }
-                    n++;
-                }
-                doTakeoffCooldown = true;
-                minecraftClient.options.keyJump.setPressed(true);
+        // If we're high enough, transition to auto flight and return
+        if (distanceToGround > config.minHeight) {
+            isTakingOff = false;
+            minecraftClient.options.keyUse.setPressed(false);
+            minecraftClient.options.keyJump.setPressed(false);
+            autoFlightEnabled = true;
+            pitchMod = 3f;
+            if (shouldFlyToAfterTakeoff) {
+                isFlyingTo = true;
+                shouldFlyToAfterTakeoff = false;
+                minecraftClient.inGameHud.addChatMessage(MessageType.SYSTEM,
+                        new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos)
+                                .formatted(Formatting.GREEN),
+                        player.getUuid());
             }
             return;
         }
 
-        // Precondition: we are already taking off
-        if (player != null) {
-            // If we're high enough, transition to auto flight and return
-            if (groundheight > config.minHeight) {
-                isTakingOff = false;
-                minecraftClient.options.keyUse.setPressed(false);
-                minecraftClient.options.keyJump.setPressed(false);
-                autoFlightEnabled = true;
-                pitchMod = 3f;
-                if (shouldFlyToAfterTakeoff) {
-                    isFlyingTo = true;
-                    shouldFlyToAfterTakeoff = false;
-                    minecraftClient.inGameHud.addChatMessage(MessageType.SYSTEM,
-                            new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos)
-                                    .formatted(Formatting.GREEN),
-                            player.getUuid());
-                }
-                return;
-            }
+        // If we're not flying, start flying
+        if (!player.isFallFlying())
+            minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
 
-            // If we're not flying, start flying
-            if (!player.isFallFlying())
-                minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
-
-            Item itemMain = player.getMainHandStack().getItem();
-            Item itemOff = player.getOffHandStack().getItem();
-            boolean hasFirework = (itemMain.toString().equals("firework_rocket")
-                    || itemOff.toString().equals("firework_rocket"));
-            if (!hasFirework) {
-                minecraftClient.options.keyUse.setPressed(false);
-                minecraftClient.options.keyJump.setPressed(false);
-                isTakingOff = false;
-                player.sendMessage(
-                        new TranslatableText("text.elytraautopilot.takeoffAbort.noFirework").formatted(Formatting.RED),
-                        true);
-            } else
-                // If we have rockets & the angle and velocity are correct, use a rocket
-                minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
-        }
+        Item itemMain = player.getMainHandStack().getItem();
+        Item itemOff = player.getOffHandStack().getItem();
+        boolean hasFirework = (itemMain.toString().equals("firework_rocket")
+                || itemOff.toString().equals("firework_rocket"));
+        if (!hasFirework) {
+            minecraftClient.options.keyUse.setPressed(false);
+            minecraftClient.options.keyJump.setPressed(false);
+            isTakingOff = false;
+            player.sendMessage(
+                    new TranslatableText("text.elytraautopilot.takeoffAbort.noFirework").formatted(Formatting.RED),
+                    true);
+        } else
+            // If we have rockets & the angle and velocity are correct, use a rocket
+            minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
     }
 
     private void onScreenTick() // Once every screen frame
@@ -249,7 +256,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                         return;
                     }
                     isDescending = true;
-                    if (config.riskyLanding && groundheight > 60) {
+                    if (config.riskyLanding && distanceToGround > 60) {
                         if (currentHorizontalVelocity > 0.3f || currentVelocity > 1.0f) { // TODO make it smoother
                             smoothLanding(player, speedMod);
                         } else {
@@ -331,7 +338,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         else {
             showHud = false;
             autoFlightEnabled = false;
-            groundheight = -1f;
+            distanceToGround = -1f;
         }
 
         double altitude;
@@ -380,7 +387,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
 
         if (!keybindingWasPressedOnPreviousTick && keyBinding.isPressed()) {
             if (player.isFallFlying()) {
-                if (!autoFlightEnabled && groundheight < config.minHeight) {
+                if (!autoFlightEnabled && distanceToGround < config.minHeight) {
                     player.sendMessage(new TranslatableText("text.elytraautopilot.autoFlightFail.tooLow")
                             .formatted(Formatting.RED), true);
                 } else {
@@ -434,15 +441,15 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 int l = world.getBottomY();
                 Vec3d clientPos = player.getPos();
                 if (!player.world.isChunkLoaded((int) clientPos.getX(), (int) clientPos.getZ())) {
-                    groundheight = -1f;
+                    distanceToGround = -1f;
                 } else {
                     for (double i = clientPos.getY(); i > l; i--) {
                         BlockPos blockPos = new BlockPos(clientPos.getX(), i, clientPos.getZ());
                         if (world.getBlockState(blockPos).isSolidBlock(world, blockPos)) {
-                            groundheight = clientPos.getY() - i;
+                            distanceToGround = clientPos.getY() - i;
                             break;
                         } else
-                            groundheight = -1f;
+                            distanceToGround = -1f;
                     }
                 }
 
@@ -474,7 +481,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
 
             hudString[1] = new TranslatableText("text.elytraautopilot.hud.altitude", String.format("%.2f", altitude));
             hudString[2] = new TranslatableText("text.elytraautopilot.hud.heightFromGround",
-                    (groundheight == -1f ? "???" : String.format("%.2f", groundheight)));
+                    (distanceToGround == -1f ? "???" : String.format("%.2f", distanceToGround)));
 
             hudString[3] = new TranslatableText("text.elytraautopilot.hud.speed",
                     String.format("%.2f", currentVelocity * 20));
