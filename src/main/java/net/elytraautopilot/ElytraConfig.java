@@ -12,12 +12,12 @@ public class ElytraConfig {
     public double pullUpSpeed = 2.1605124;
     public double pullDownSpeed = 0.20545267;
     public double maxHeight = 360;
-    public boolean autoLanding = true;
-    public double autoLandSpeed = 3;
-    public double turningSpeed = 3;
     public double minHeight = 180;
+    public double landingSpeed = 3;
+    public double turningSpeed = 3;
     public double takeOffPull = 10;
-    public boolean riskyLanding = false;
+
+    public boolean autoLanding = true;
     public boolean poweredFlight = false;
     public boolean elytraHotswap = true;
 }
