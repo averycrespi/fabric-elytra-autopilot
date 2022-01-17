@@ -31,6 +31,7 @@
   "text.elytraautopilot.flyToTarget": "Flying to %d, %d",
   "text.elytraautopilot.flyToTarget.error.notFlying": "Start flying before using /flyto",
 
+  "text.elytraautopilot.takeoff.error.autopilotEnabled": "Cannot takeoff while the autopilot is already enabled",
   "text.elytraautopilot.takeoff.error.noElytraEquipped": "Equip an elytra before taking off",
   "text.elytraautopilot.takeoff.error.elytraBroken": "Your elytra is broken",
   "text.elytraautopilot.takeoff.error.fireworkRequired": "Hold fireworks in either hand before taking off",

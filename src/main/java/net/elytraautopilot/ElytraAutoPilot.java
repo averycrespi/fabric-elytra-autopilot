@@ -118,7 +118,10 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
 
         if (state != ElytraState.Inactive) {
-            return; // TODO: send message that player cannot takeoff while doing something else
+            player.sendMessage(
+                    new TranslatableText("ketext.elytraautopilot.takeoff.error.autopilotEnabled")
+                            .formatted(Formatting.RED),
+                    true);
         } else if (!hasElytraEquipped(player)) {
             player.sendMessage(
                     new TranslatableText("text.elytraautopilot.takeoff.error.noElytraEquipped")
@@ -314,7 +317,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    // TODO: add powered flight
     private void pullUp(PlayerEntity player) {
         float pitch = player.getPitch();
         player.setPitch((float) (pitch - config.pullUpSpeed * speedModifier));
