@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientModInitializer {
+
     public ElytraConfig config;
     public ElytraAutoPilot main = this;
     public static ElytraAutoPilot instance;
@@ -46,6 +47,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private int takeoffCountdown = 0;
     public boolean shouldFlyToAfterTakeoff = false;
 
+    private double speedModifier = 1f;
     private double pitchModifier = 1f;
 
     public int argXpos;
@@ -67,9 +69,9 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private double averageVelocity = 0f;
     private double averageHorizontalVelocity = 0f;
 
-    public boolean showHud;
     private int ticksSinceHudUpdate = 0;
-    public BaseText[] hudString;
+    public boolean showHud;
+    public BaseText[] hudContents;
 
     @Override
     public void onInitializeClient() {
@@ -97,12 +99,18 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
+    /**
+     * Update the autopilot state for a given reason.
+     */
     public void setState(ElytraState newState, String reason) {
         System.out.println(
                 String.format("Changing ElytraAutoPilot state from %s to %s because %s", state, newState, reason));
         state = newState;
     }
 
+    /**
+     * Start the takeoff sequence.
+     */
     public void startTakeoff() {
         PlayerEntity player = minecraftClient.player;
         if (player == null) {
@@ -110,29 +118,48 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
 
         if (state != ElytraState.Inactive) {
-            return;
+            return; // TODO: send message that player cannot takeoff while doing something else
+        } else if (!hasElytraEquipped(player)) {
+            player.sendMessage(
+                    new TranslatableText("text.elytraautopilot.takeoffFail.noElytraEquipped").formatted(Formatting.RED),
+                    true);
+        } else if (getElytraDurability(player) == 1) {
+            player.sendMessage(
+                    new TranslatableText("text.elytraautopilot.takeoffFail.elytraBroken").formatted(Formatting.RED),
+                    true);
+        } else if (!isHoldingFirework(player)) {
+            player.sendMessage(
+                    new TranslatableText("text.elytraautopilot.takeoffFail.fireworkRequired").formatted(Formatting.RED),
+                    true);
+        } else if (!hasClearSky(player)) {
+            player.sendMessage(
+                    new TranslatableText("text.elytraautopilot.takeoffFail.clearSkyNeeded").formatted(Formatting.RED),
+                    true);
+        } else {
+            // Immediately jump, then start taking off after a countdown
+            minecraftClient.options.keyJump.setPressed(true);
+            setState(ElytraState.CountingDownToTakeOff, "started takeoff");
         }
+    }
 
+    private boolean hasElytraEquipped(PlayerEntity player) {
         Item chestItem = player.getInventory().armor.get(2).getItem();
-        int elytraDurability = player.getInventory().armor.get(2).getMaxDamage()
+        return chestItem.toString().equals("elytra");
+    }
+
+    private int getElytraDurability(PlayerEntity player) {
+        return player.getInventory().armor.get(2).getMaxDamage()
                 - player.getInventory().armor.get(2).getDamage();
-        if (!chestItem.toString().equals("elytra")) {
-            player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.noElytraEquipped")
-                    .formatted(Formatting.RED), true);
-            return;
-        }
-        if (elytraDurability == 1) {
-            player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.elytraBroken")
-                    .formatted(Formatting.RED), true);
-            return;
-        }
+    }
 
-        if (!isHoldingFirework(player)) {
-            player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.fireworkRequired")
-                    .formatted(Formatting.RED), true);
-            return;
-        }
+    private boolean isHoldingFirework(PlayerEntity player) {
+        Item mainHandItem = player.getMainHandStack().getItem();
+        Item offHandItem = player.getOffHandStack().getItem();
+        return (mainHandItem.toString().equals("firework_rocket")
+                || offHandItem.toString().equals("firework_rocket"));
+    }
 
+    private boolean hasClearSky(PlayerEntity player) {
         World world = player.world;
         Vec3d clientPos = player.getPos();
         double clientX = clientPos.getX();
@@ -142,139 +169,163 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         for (double y = clientY; y < topY; y++) {
             BlockPos blockPos = new BlockPos(clientX, y + 2, clientZ);
             if (!world.getBlockState(blockPos).isAir()) {
-                player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.clearSkyNeeded")
-                        .formatted(Formatting.RED), true);
-                return;
+                return false;
             }
         }
-
-        // Immediately jump, then start taking off after a countdown
-        minecraftClient.options.keyJump.setPressed(true);
-        setState(ElytraState.CountingDownToTakeOff, "started takeoff");
+        return true;
     }
 
-    private void onScreenTick() // Once every screen frame
-    {
-        // Fps adaptation (not perfect but works nicely most of the time)
-        float fps_delta = minecraftClient.getLastFrameDuration();
-        float fps_result = 20 / fps_delta;
-        double speedMod = 60 / fps_result; // Adapt to base 60 FPS
-
-        if (minecraftClient.isPaused() && minecraftClient.isInSingleplayer())
+    /**
+     * Runs once every screen frame.
+     */
+    private void onScreenTick() {
+        if (minecraftClient.isPaused() && minecraftClient.isInSingleplayer()) {
             return;
-        PlayerEntity player = minecraftClient.player;
+        }
 
+        PlayerEntity player = minecraftClient.player;
         if (player == null) {
             return;
         }
 
-        // If we're taking off, adjust the angle to look straight up
-        if (state == ElytraState.TakingOff) {
-            float pitch = player.getPitch();
-            if (pitch > -90f) {
-                player.setPitch((float) (pitch - config.takeOffPull * speedMod));
-            }
-            if (pitch <= -90f)
-                player.setPitch(-90f);
+        if (state != ElytraState.Inactive
+                && config.elytraHotswap
+                && player.isFallFlying()
+                && getElytraDurability(player) < 5) {
+            swapElytra(player);
         }
 
-        if (state == ElytraState.Flying || state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
-            // If hotswap is enabled, swap out the elytra if it's nearly broken
-            if (config.elytraHotswap) {
-                int elytraDurability = player.getInventory().armor.get(2).getMaxDamage()
-                        - player.getInventory().armor.get(2).getDamage();
-                if (elytraDurability <= 5) { // Leave some leeway so we don't stop flying
-                    // Optimization: find the first elytra with sufficient durability
-                    ItemStack newElytra = null;
-                    int minDurability = 10;
-                    for (ItemStack itemStack : player.getInventory().main) {
-                        if (itemStack.getItem().toString().equals("elytra")) {
-                            int itemDurability = itemStack.getMaxDamage() - itemStack.getDamage();
-                            if (itemDurability >= minDurability) {
-                                newElytra = itemStack;
-                                break;
-                            }
-                        }
-                    }
-                    if (newElytra != null) {
-                        int chestSlot = 6;
-                        minecraftClient.interactionManager.clickSlot(
-                                player.playerScreenHandler.syncId,
-                                chestSlot,
-                                player.getInventory().main.indexOf(newElytra),
-                                SlotActionType.SWAP,
-                                player);
-                        player.playSound(SoundEvents.ITEM_ARMOR_EQUIP_ELYTRA, 1.0F, 1.0F);
-                        player.sendMessage(
-                                new TranslatableText("text.elytraautopilot.swappedElytra").formatted(Formatting.GREEN),
-                                true);
-                    }
+        updateSpeedModifier();
+        updateFlightAngleAndDistance(player);
+        updateFlightPull(player);
+    }
+
+    private void swapElytra(PlayerEntity player) {
+        // Optimization: find the first elytra with sufficient durability
+        ItemStack newElytra = null;
+        int minDurability = 10;
+        for (ItemStack itemStack : player.getInventory().main) {
+            if (itemStack.getItem().toString().equals("elytra")) {
+                int itemDurability = itemStack.getMaxDamage() - itemStack.getDamage();
+                if (itemDurability >= minDurability) {
+                    newElytra = itemStack;
+                    break;
                 }
             }
+        }
 
-            float pitch = player.getPitch();
-            if (state == ElytraState.Landing) {
-                if (!config.autoLanding) {
-                    setState(ElytraState.Inactive, "auto landing is disabled");
-                    return;
-                }
-                isDescending = true;
-                if (config.riskyLanding && distanceToGround > 60) {
-                    if (currentHorizontalVelocity > 0.3f || currentVelocity > 1.0f) { // TODO make it smoother
-                        smoothLanding(player, speedMod);
-                    } else {
-                        riskyLanding(player, speedMod);
-                    }
-                } else {
-                    smoothLanding(player, speedMod);
-                }
-            } else if (state == ElytraState.FlyingToTarget) {
-                // Precondition: we're flying but not landing
-                Vec3d playerPosition = player.getPos();
-                double xDifference = (double) argXpos - playerPosition.x;
-                double zDifference = (double) argZpos - playerPosition.z;
-                float targetYaw = MathHelper
-                        .wrapDegrees(
-                                (float) (MathHelper.atan2(zDifference, xDifference) * 57.2957763671875D) - 90.0F);
-                float yaw = MathHelper.wrapDegrees(player.getYaw());
-                if (Math.abs(yaw - targetYaw) < config.turningSpeed * 2 * speedMod)
-                    player.setYaw(targetYaw);
-                else {
-                    if (yaw < targetYaw)
-                        player.setYaw((float) (yaw + config.turningSpeed * speedMod));
-                    if (yaw > targetYaw)
-                        player.setYaw((float) (yaw - config.turningSpeed * speedMod));
-                }
-                distanceToTarget = Math.sqrt(xDifference * xDifference + zDifference * zDifference);
+        if (newElytra != null) {
+            int chestSlot = 6;
+            minecraftClient.interactionManager.clickSlot(
+                    player.playerScreenHandler.syncId,
+                    chestSlot,
+                    player.getInventory().main.indexOf(newElytra),
+                    SlotActionType.SWAP,
+                    player);
+            player.playSound(SoundEvents.ITEM_ARMOR_EQUIP_ELYTRA, 1.0F, 1.0F);
+            player.sendMessage(
+                    new TranslatableText("text.elytraautopilot.swappedElytra").formatted(Formatting.GREEN),
+                    true);
+        }
+    }
 
-                // If we're close enough, start landing
+    private void updateSpeedModifier() {
+        float fpsDelta = minecraftClient.getLastFrameDuration();
+        float fpsResult = 20 / fpsDelta;
+        speedModifier = 60 / fpsResult; // Adapt to 60 FPS base
+    }
+
+    private void updateFlightAngleAndDistance(PlayerEntity player) {
+        switch (state) {
+            case TakingOff:
+                updatePitchDuringTakeoff(player);
+                break;
+            case FlyingToTarget:
+                updateYawAndDistanceWhileFlyingToTarget(player);
                 if (distanceToTarget < 20) {
                     setState(ElytraState.Landing, "player is close to target");
                 }
-            }
+                break;
+            case Landing:
+                if (config.autoLanding) {
+                    isDescending = true;
+                    updatePitchAndYawDuringLanding(player);
+                } else {
+                    setState(ElytraState.Inactive, "auto landing is disabled");
+                }
+                break;
+            default:
+                break;
+        }
+    }
 
-            if (state != ElytraState.Landing) {
-                if (isPullingUp) { // TODO add powered flight
-                    player.setPitch((float) (pitch - config.pullUpSpeed * speedMod));
-                    pitch = player.getPitch();
-                    if (pitch <= config.pullUpAngle) {
-                        player.setPitch((float) config.pullUpAngle);
-                    }
+    private void updatePitchDuringTakeoff(PlayerEntity player) {
+        float pitch = player.getPitch();
+        if (pitch > -90f) {
+            player.setPitch((float) (pitch - config.takeOffPull * speedModifier));
+        } else if (pitch <= -90f) {
+            player.setPitch(-90f);
+        }
+    }
+
+    private void updatePitchAndYawDuringLanding(PlayerEntity player) {
+        float yaw = MathHelper.wrapDegrees(player.getYaw());
+        player.setYaw((float) (yaw + config.autoLandSpeed * speedModifier));
+        player.setPitch(30f);
+    }
+
+    private void updateYawAndDistanceWhileFlyingToTarget(PlayerEntity player) {
+        Vec3d playerPosition = player.getPos();
+        double xDifference = (double) argXpos - playerPosition.x;
+        double zDifference = (double) argZpos - playerPosition.z;
+        float targetYaw = MathHelper
+                .wrapDegrees((float) (MathHelper.atan2(zDifference, xDifference) * 57.2957763671875D) - 90.0F);
+        float yaw = MathHelper.wrapDegrees(player.getYaw());
+        if (Math.abs(yaw - targetYaw) < config.turningSpeed * 2 * speedModifier) {
+            player.setYaw(targetYaw);
+        } else if (yaw < targetYaw) {
+            player.setYaw((float) (yaw + config.turningSpeed * speedModifier));
+        } else if (yaw > targetYaw) {
+            player.setYaw((float) (yaw - config.turningSpeed * speedModifier));
+        }
+        distanceToTarget = Math.sqrt(xDifference * xDifference + zDifference * zDifference);
+    }
+
+    private void updateFlightPull(PlayerEntity player) {
+        switch (state) {
+            case Flying:
+            case FlyingToTarget:
+                if (isPullingUp) {
+                    pullUp(player);
                 }
                 if (isPullingDown) {
-                    player.setPitch((float) (pitch + config.pullDownSpeed * pitchModifier * speedMod));
-                    pitch = player.getPitch();
-                    if (pitch >= config.pullDownAngle) {
-                        player.setPitch((float) config.pullDownAngle);
-                    }
+                    pullDown(player);
                 }
-            }
+                break;
+            case Landing:
+                break;
+            default:
+                isPullingUp = false;
+                isPullingDown = false;
+                pitchModifier = 1f;
+                break;
+        }
+    }
 
-        } else {
-            // Precondition: auto-flight is disabled
-            isPullingUp = false;
-            isPullingDown = false;
-            pitchModifier = 1f;
+    // TODO: add powered flight
+    private void pullUp(PlayerEntity player) {
+        float pitch = player.getPitch();
+        player.setPitch((float) (pitch - config.pullUpSpeed * speedModifier));
+        if (player.getPitch() <= config.pullUpAngle) {
+            player.setPitch((float) config.pullUpAngle);
+        }
+    }
+
+    private void pullDown(PlayerEntity player) {
+        float pitch = player.getPitch();
+        player.setPitch((float) (pitch + config.pullDownSpeed * pitchModifier * speedModifier));
+        if (player.getPitch() >= config.pullDownAngle) {
+            player.setPitch((float) config.pullDownAngle);
         }
     }
 
@@ -314,7 +365,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             }
         }
 
-        // Optimization: only perform one of the following actions per tick
         switch (state) {
             case Inactive:
                 break;
@@ -345,7 +395,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 ticksSinceHudUpdate = 0;
                 updateVelocityList(player);
                 updateAverageVelocity();
-                updateHudString(player);
+                updateHudContents(player);
             }
         } else {
             resetVelocityData();
@@ -441,13 +491,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
     }
 
-    private boolean isHoldingFirework(PlayerEntity player) {
-        Item mainHandItem = player.getMainHandStack().getItem();
-        Item offHandItem = player.getOffHandStack().getItem();
-        return (mainHandItem.toString().equals("firework_rocket")
-                || offHandItem.toString().equals("firework_rocket"));
-    }
-
     private void updateCurrentVelocity(PlayerEntity player) {
         Vec3d newPosition = player.getPos();
 
@@ -517,65 +560,65 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     }
 
     // TODO: break into multiple methods
-    private void updateHudString(PlayerEntity player) {
-        if (hudString == null) {
-            hudString = new BaseText[9];
+    private void updateHudContents(PlayerEntity player) {
+        if (hudContents == null) {
+            hudContents = new BaseText[9];
         }
 
         if (!config.showgui || minecraftClient.options.debugEnabled) { // TODO make this more colorful
-            hudString[0] = new LiteralText("");
-            hudString[1] = new LiteralText("");
-            hudString[2] = new LiteralText("");
-            hudString[3] = new LiteralText("");
-            hudString[4] = new LiteralText("");
-            hudString[5] = new LiteralText("");
-            hudString[6] = new LiteralText("");
-            hudString[7] = new LiteralText("");
-            hudString[8] = new LiteralText("");
+            hudContents[0] = new LiteralText("");
+            hudContents[1] = new LiteralText("");
+            hudContents[2] = new LiteralText("");
+            hudContents[3] = new LiteralText("");
+            hudContents[4] = new LiteralText("");
+            hudContents[5] = new LiteralText("");
+            hudContents[6] = new LiteralText("");
+            hudContents[7] = new LiteralText("");
+            hudContents[8] = new LiteralText("");
             return;
         }
 
-        hudString[0] = (BaseText) new TranslatableText("text.elytraautopilot.hud.toggleAutoFlight")
+        hudContents[0] = (BaseText) new TranslatableText("text.elytraautopilot.hud.toggleAutoFlight")
                 .append(new TranslatableText(
                         (state == ElytraState.Flying || state == ElytraState.FlyingToTarget
                                 || state == ElytraState.Landing) ? "text.elytraautopilot.hud.true"
                                         : "text.elytraautopilot.hud.false"));
 
-        hudString[1] = new TranslatableText("text.elytraautopilot.hud.altitude",
+        hudContents[1] = new TranslatableText("text.elytraautopilot.hud.altitude",
                 String.format("%.2f", player.getPos().y));
 
-        hudString[2] = new TranslatableText("text.elytraautopilot.hud.heightFromGround",
+        hudContents[2] = new TranslatableText("text.elytraautopilot.hud.heightFromGround",
                 (distanceToGround == -1f ? "???" : String.format("%.2f", distanceToGround)));
 
-        hudString[3] = new TranslatableText("text.elytraautopilot.hud.speed",
+        hudContents[3] = new TranslatableText("text.elytraautopilot.hud.speed",
                 String.format("%.2f", currentVelocity * 20));
 
         if (averageVelocity == 0f) {
-            hudString[4] = new TranslatableText("text.elytraautopilot.hud.calculating");
-            hudString[5] = new LiteralText("");
+            hudContents[4] = new TranslatableText("text.elytraautopilot.hud.calculating");
+            hudContents[5] = new LiteralText("");
         } else {
-            hudString[4] = new TranslatableText("text.elytraautopilot.hud.avgSpeed",
+            hudContents[4] = new TranslatableText("text.elytraautopilot.hud.avgSpeed",
                     String.format("%.2f", averageVelocity * 20));
-            hudString[5] = new TranslatableText("text.elytraautopilot.hud.avgHSpeed",
+            hudContents[5] = new TranslatableText("text.elytraautopilot.hud.avgHSpeed",
                     String.format("%.2f", averageHorizontalVelocity * 20));
         }
 
         if (state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
-            hudString[6] = new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos);
+            hudContents[6] = new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos);
             if (distanceToTarget != 0f) {
-                hudString[7] = new TranslatableText("text.elytraautopilot.hud.eta",
+                hudContents[7] = new TranslatableText("text.elytraautopilot.hud.eta",
                         String.format("%.1f", distanceToTarget / (averageHorizontalVelocity * 20)));
             }
-            hudString[8] = (BaseText) new TranslatableText("text.elytraautopilot.hud.autoLand")
+            hudContents[8] = (BaseText) new TranslatableText("text.elytraautopilot.hud.autoLand")
                     .append(new TranslatableText(config.autoLanding ? "text.elytraautopilot.hud.enabled"
                             : "text.elytraautopilot.hud.disabled"));
             if (state == ElytraState.Landing) {
-                hudString[7] = new TranslatableText("text.elytraautopilot.hud.landing");
+                hudContents[7] = new TranslatableText("text.elytraautopilot.hud.landing");
             }
         } else {
-            hudString[6] = new LiteralText("");
-            hudString[7] = new LiteralText("");
-            hudString[8] = new LiteralText("");
+            hudContents[6] = new LiteralText("");
+            hudContents[7] = new LiteralText("");
+            hudContents[8] = new LiteralText("");
         }
     }
 
@@ -594,21 +637,4 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             ConfigManager.createAndShowSettings();
         }
     }
-
-    // TODO: refactor
-    private void smoothLanding(PlayerEntity player, double speedMod) {
-        float yaw = MathHelper.wrapDegrees(player.getYaw());
-        player.setYaw((float) (yaw + config.autoLandSpeed * speedMod));
-        player.setPitch(30f);
-    }
-
-    // TODO: refactor
-    private void riskyLanding(PlayerEntity player, double speedMod) {
-        float pitch = player.getPitch();
-        player.setPitch((float) (pitch + config.takeOffPull * speedMod));
-        pitch = player.getPitch();
-        if (pitch > 90f)
-            player.setPitch(90f);
-    }
-
 }

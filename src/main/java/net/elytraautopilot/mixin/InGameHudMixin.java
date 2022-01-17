@@ -18,24 +18,25 @@ public class InGameHudMixin {
 	@Inject(at = @At(value = "RETURN"), method = "render")
 	public void renderPost(MatrixStack matrixStack, float f, CallbackInfo ci) {
 		if (!ci.isCancelled()) {
-
-			if (minecraftClient == null)
+			if (minecraftClient == null) {
 				minecraftClient = MinecraftClient.getInstance();
-			if (elytraAutoPilot == null)
+			}
+
+			if (elytraAutoPilot == null) {
 				elytraAutoPilot = ElytraAutoPilot.instance;
+			}
 
-			if (elytraAutoPilot.showHud) {
+			if (elytraAutoPilot.showHud && elytraAutoPilot.hudContents != null) {
+				float stringX = elytraAutoPilot.config.guiX;
+				float stringY = elytraAutoPilot.config.guiY;
 
-				if (elytraAutoPilot.hudString != null) {
-					float stringX = elytraAutoPilot.config.guiX;
-					float stringY = elytraAutoPilot.config.guiY;
-
-					for (int i = 0; i < elytraAutoPilot.hudString.length; i++) {
-						minecraftClient.textRenderer.drawWithShadow(matrixStack, elytraAutoPilot.hudString[i], stringX,
-								stringY, 0xFFFFFF);
-						stringY += minecraftClient.textRenderer.fontHeight + 1;
-
-					}
+				for (int i = 0; i < elytraAutoPilot.hudContents.length; i++) {
+					minecraftClient.textRenderer.drawWithShadow(
+							matrixStack,
+							elytraAutoPilot.hudContents[i],
+							stringX,
+							stringY + i * (minecraftClient.textRenderer.fontHeight + 1),
+							0xFFFFFF);
 				}
 			}
 		}
