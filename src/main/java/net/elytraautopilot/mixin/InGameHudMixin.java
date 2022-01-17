@@ -26,14 +26,14 @@ public class InGameHudMixin {
 				elytraAutoPilot = ElytraAutoPilot.instance;
 			}
 
-			if (elytraAutoPilot.showHud && elytraAutoPilot.hudContents != null) {
+			if (elytraAutoPilot.showHud && elytraAutoPilot.hudLines != null) {
 				float stringX = elytraAutoPilot.config.guiX;
 				float stringY = elytraAutoPilot.config.guiY;
 
-				for (int i = 0; i < elytraAutoPilot.hudContents.length; i++) {
+				for (int i = 0; i < elytraAutoPilot.hudLines.length; i++) {
 					minecraftClient.textRenderer.drawWithShadow(
 							matrixStack,
-							elytraAutoPilot.hudContents[i],
+							elytraAutoPilot.hudLines[i],
 							stringX,
 							stringY + i * (minecraftClient.textRenderer.fontHeight + 1),
 							0xFFFFFF);
