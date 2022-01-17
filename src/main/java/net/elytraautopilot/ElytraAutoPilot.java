@@ -34,22 +34,19 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private ElytraState state = ElytraState.Inactive;
 
     public MinecraftClient minecraftClient;
-    private static KeyBinding keyBinding;
 
-    private boolean keybindingWasPressedOnPreviousTick = false;
+    private static KeyBinding keyBinding;
+    private boolean keyBindingWasPressedOnPreviousTick = false;
 
     public boolean isDescending;
     public boolean isPullingUp;
     public boolean isPullingDown;
 
+    private static final int MAX_TAKEOFF_COUNTDOWN = 5;
+    private int takeoffCountdown = 0;
     public boolean shouldFlyToAfterTakeoff = false;
-    private static final int MAX_TAKEOFF_COOLDOWN = 5;
-    private int takeoffCooldown = 0;
 
-    private double pitchMod = 1f; // ?
-
-    private double velHigh = 0f; // ?
-    private double velLow = 0f; // ?
+    private double pitchModifier = 1f;
 
     public int argXpos;
     public int argZpos;
@@ -89,7 +86,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 GLFW.GLFW_KEY_R,
                 "text.elytraautopilot.title");
         KeyBindingHelper.registerKeyBinding(keyBinding);
-        keybindingWasPressedOnPreviousTick = false; // TODO: do we need this?
 
         HudRenderCallback.EVENT.register((matrixStack, tickDelta) -> ElytraAutoPilot.this.onScreenTick());
         ClientTickEvents.END_CLIENT_TICK.register(e -> this.onClientTick());
@@ -107,9 +103,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         state = newState;
     }
 
-    /**
-     * Start the takeoff sequence.
-     */
     public void startTakeoff() {
         PlayerEntity player = minecraftClient.player;
         if (player == null) {
@@ -134,9 +127,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             return;
         }
 
-        Item mainHandItem = player.getMainHandStack().getItem();
-        Item offHandItem = player.getOffHandStack().getItem();
-        if (!mainHandItem.toString().equals("firework_rocket") && !offHandItem.toString().equals("firework_rocket")) {
+        if (!isHoldingFirework(player)) {
             player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.fireworkRequired")
                     .formatted(Formatting.RED), true);
             return;
@@ -144,10 +135,12 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
 
         World world = player.world;
         Vec3d clientPos = player.getPos();
+        double clientX = clientPos.getX();
         double clientY = clientPos.getY();
+        double clientZ = clientPos.getZ();
         double topY = world.getTopY();
         for (double y = clientY; y < topY; y++) {
-            BlockPos blockPos = new BlockPos(clientPos.getX(), y + 2, clientPos.getZ());
+            BlockPos blockPos = new BlockPos(clientX, y + 2, clientZ);
             if (!world.getBlockState(blockPos).isAir()) {
                 player.sendMessage(new TranslatableText("text.elytraautopilot.takeoffFail.clearSkyNeeded")
                         .formatted(Formatting.RED), true);
@@ -155,7 +148,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             }
         }
 
-        // Initiate a cooldown so the player has enough time to jump
+        // Immediately jump, then start taking off after a countdown
         minecraftClient.options.keyJump.setPressed(true);
         setState(ElytraState.CountingDownToTakeOff, "started takeoff");
     }
@@ -269,7 +262,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                     }
                 }
                 if (isPullingDown) {
-                    player.setPitch((float) (pitch + config.pullDownSpeed * pitchMod * speedMod));
+                    player.setPitch((float) (pitch + config.pullDownSpeed * pitchModifier * speedMod));
                     pitch = player.getPitch();
                     if (pitch >= config.pullDownAngle) {
                         player.setPitch((float) config.pullDownAngle);
@@ -279,11 +272,9 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
 
         } else {
             // Precondition: auto-flight is disabled
-            velHigh = 0f;
-            velLow = 0f;
             isPullingUp = false;
-            pitchMod = 1f;
             isPullingDown = false;
+            pitchModifier = 1f;
         }
     }
 
@@ -310,29 +301,42 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 updateDistanceToGround(player);
             }
         } else {
-            if (state != ElytraState.Inactive && state != ElytraState.TakingOff
-                    && state != ElytraState.CountingDownToTakeOff) {
-                setState(ElytraState.Inactive, "player stopped flying");
-            }
             showHud = false;
             distanceToGround = 0f;
+            switch (state) {
+                case Flying:
+                case FlyingToTarget:
+                case Landing:
+                    setState(ElytraState.Inactive, "player stopped flying");
+                    break;
+                default:
+                    break;
+            }
         }
 
         // Optimization: only perform one of the following actions per tick
-        if (state == ElytraState.CountingDownToTakeOff) {
-            updateTakeoffCooldown();
-        } else if (state == ElytraState.TakingOff) {
-            if (distanceToGround > config.minHeight) {
-                endTakeoff(player);
-            } else {
-                // TODO: do we need this?
-                if (!player.isFallFlying()) {
-                    minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
+        switch (state) {
+            case Inactive:
+                break;
+            case CountingDownToTakeOff:
+                updateTakeoffCountdown();
+                break;
+            case TakingOff:
+                if (distanceToGround > config.minHeight) {
+                    endTakeoff(player);
+                } else {
+                    useFireworkDuringTakeoff(player);
                 }
-                useFireworkDuringTakeoff(player);
-            }
-        } else if (state == ElytraState.Flying || state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
-            updateAutoFlightDuringClientTick(player);
+                break;
+            case Flying:
+            case FlyingToTarget:
+            case Landing:
+                if (player.isTouchingWater() || player.isInLava()) {
+                    setState(ElytraState.Inactive, "player touched liquid while flying");
+                } else {
+                    updateFlightState(player);
+                }
+                break;
         }
 
         if (showHud) {
@@ -347,48 +351,37 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             resetVelocityData();
         }
 
-        if (!keybindingWasPressedOnPreviousTick && keyBinding.isPressed()) {
-            handleKeybindingPress(player);
+        if (!keyBindingWasPressedOnPreviousTick && keyBinding.isPressed()) {
+            handleKeyBindingPress(player);
         }
-        keybindingWasPressedOnPreviousTick = keyBinding.isPressed();
+        keyBindingWasPressedOnPreviousTick = keyBinding.isPressed();
     }
 
-    /**
-     * Update auto-flight during a client tick.
-     */
-    private void updateAutoFlightDuringClientTick(PlayerEntity player) {
-        // TODO: move this into main client tick?
-        if (player.isTouchingWater() || player.isInLava()) {
-            setState(ElytraState.Inactive, "player touched liquid while flying");
-            return;
-        }
-
+    private void updateFlightState(PlayerEntity player) {
         double altitude = player.getPos().y;
         if (isDescending) {
             isPullingUp = false;
             isPullingDown = true;
-            // If we're over (or nearly over) the max height, allow a faster descent before
-            // starting to pull up
-            if (altitude > config.maxHeight) { // TODO fix this maybe
-                velHigh = 0.3f;
+
+            // If we're too high, allow a faster descent before pulling up
+            double velocityModifier = 0f;
+            if (altitude > config.maxHeight) {
+                velocityModifier = 0.3f;
             } else if (altitude > config.maxHeight - 10) {
-                velLow = 0.28475f;
+                velocityModifier = 0.28475f;
             }
-            double velMod = Math.max(velHigh, velLow);
-            if (currentVelocity >= config.pullDownMaxVelocity + velMod) {
+
+            if (currentVelocity >= config.pullDownMaxVelocity + velocityModifier) {
                 isDescending = false;
                 isPullingDown = false;
                 isPullingUp = true;
-                pitchMod = 1f;
+                pitchModifier = 1f;
             }
         } else {
-            // Precondition: we're not descending
-            velHigh = 0f;
-            velLow = 0f;
             isPullingUp = true;
             isPullingDown = false;
 
-            // If our velocity is too low or we're nearly too high, start descending
+            // If our velocity is too low or we're too high, start descending
             if (currentVelocity <= config.pullUpMinVelocity || altitude > config.maxHeight - 10) {
                 isDescending = true;
                 isPullingDown = true;
@@ -397,29 +390,21 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    /**
-     * Update the takeoff cooldown.
-     *
-     * This cooldown gives the player time to jump before we start the takeoff.
-     */
-    private void updateTakeoffCooldown() {
-        if (takeoffCooldown < MAX_TAKEOFF_COOLDOWN) {
-            takeoffCooldown++;
+    private void updateTakeoffCountdown() {
+        if (takeoffCountdown < MAX_TAKEOFF_COUNTDOWN) {
+            takeoffCountdown++;
         } else {
-            takeoffCooldown = 0;
+            takeoffCountdown = 0;
             setState(ElytraState.TakingOff, "finished takeoff countdown");
         }
     }
 
-    /**
-     * End the takeoff sequence.
-     */
     private void endTakeoff(PlayerEntity player) {
         minecraftClient.options.keyUse.setPressed(false);
         minecraftClient.options.keyJump.setPressed(false);
 
-        // TODO: why do we adjust pitch here?
-        pitchMod = 3f;
+        // Allow a faster pitch adjustment immediately after ending takeoff
+        pitchModifier = 3f;
 
         if (shouldFlyToAfterTakeoff) {
             shouldFlyToAfterTakeoff = false;
@@ -434,18 +419,14 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    /**
-     * Use a firework rocket during the takeoff sequence.
-     *
-     * If the player is not holding a firework, abort the takeoff sequence.
-     * TODO: should we abort here?
-     */
     private void useFireworkDuringTakeoff(PlayerEntity player) {
-        Item mainHandItem = player.getMainHandStack().getItem();
-        Item offHandItem = player.getOffHandStack().getItem();
-        boolean isHoldingFirework = (mainHandItem.toString().equals("firework_rocket")
-                || offHandItem.toString().equals("firework_rocket"));
-        if (!isHoldingFirework) {
+        // TODO: do we need this?
+        if (!player.isFallFlying()) {
+            minecraftClient.options.keyJump.setPressed(!minecraftClient.options.keyJump.isPressed());
+        }
+
+        // TODO: should we abort here?
+        if (!isHoldingFirework(player)) {
             minecraftClient.options.keyUse.setPressed(false);
             minecraftClient.options.keyJump.setPressed(false);
             player.sendMessage(
@@ -460,9 +441,13 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         minecraftClient.options.keyUse.setPressed(currentVelocity < 0.75f && player.getPitch() == -90f);
     }
 
-    /**
-     * Update the player's current velocity.
-     */
+    private boolean isHoldingFirework(PlayerEntity player) {
+        Item mainHandItem = player.getMainHandStack().getItem();
+        Item offHandItem = player.getOffHandStack().getItem();
+        return (mainHandItem.toString().equals("firework_rocket")
+                || offHandItem.toString().equals("firework_rocket"));
+    }
+
     private void updateCurrentVelocity(PlayerEntity player) {
         Vec3d newPosition = player.getPos();
 
@@ -480,9 +465,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         currentHorizontalVelocity = horizontalDifference.length();
     }
 
-    /**
-     * Update the list of previous velocities.
-     */
     private void updateVelocityList(PlayerEntity player) {
         if (velocityList.size() < MAX_VELOCITIES) {
             velocityList.add(currentVelocity);
@@ -494,9 +476,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         velocityIndex = (velocityIndex + 1) % MAX_VELOCITIES;
     }
 
-    /**
-     * Update the player's average velocity.
-     */
     private void updateAverageVelocity() {
         if (velocityList.size() >= 5) {
             averageVelocity = velocityList.stream().mapToDouble(val -> val).average().orElse(0.0);
@@ -504,33 +483,40 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    /**
-     * Update the player's distance to the ground.
-     */
+    private void resetVelocityData() {
+        previousPosition = null;
+        currentVelocity = 0f;
+        currentHorizontalVelocity = 0f;
+
+        velocityIndex = 0;
+        velocityList.clear();
+        horizontalVelocityList.clear();
+        averageVelocity = 0f;
+        averageHorizontalVelocity = 0f;
+    }
+
     private void updateDistanceToGround(PlayerEntity player) {
+        distanceToGround = -1f;
+
         World world = player.world;
         Vec3d clientPos = player.getPos();
+        double clientX = clientPos.getX();
         double clientY = clientPos.getY();
+        double clientZ = clientPos.getZ();
         double bottomY = (double) world.getBottomY();
-        if (!player.world.isChunkLoaded((int) clientPos.getX(), (int) clientPos.getZ())) {
-            distanceToGround = -1f;
-        } else {
+
+        if (player.world.isChunkLoaded((int) clientX, (int) clientZ)) {
             for (double y = clientY; y > bottomY; y--) {
-                BlockPos blockPos = new BlockPos(clientPos.getX(), y, clientPos.getZ());
+                BlockPos blockPos = new BlockPos(clientX, y, clientZ);
                 if (world.getBlockState(blockPos).isSolidBlock(world, blockPos)) {
                     distanceToGround = clientY - y;
-                    return;
-                } else {
-                    // TODO: refactor this to be less weird?
-                    distanceToGround = -1f;
+                    break;
                 }
             }
         }
     }
 
-    /**
-     * Update the HUD string.
-     */
+    // TODO: break into multiple methods
     private void updateHudString(PlayerEntity player) {
         if (hudString == null) {
             hudString = new BaseText[9];
@@ -593,25 +579,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
-    /**
-     * Reset all collected velocity data.
-     */
-    private void resetVelocityData() {
-        previousPosition = null;
-        currentVelocity = 0f;
-        currentHorizontalVelocity = 0f;
-
-        velocityIndex = 0;
-        velocityList.clear();
-        horizontalVelocityList.clear();
-        averageVelocity = 0f;
-        averageHorizontalVelocity = 0f;
-    }
-
-    /**
-     * Handle a keybinding press.
-     */
-    private void handleKeybindingPress(PlayerEntity player) {
+    private void handleKeyBindingPress(PlayerEntity player) {
         if (player.isFallFlying()) {
             if (state == ElytraState.Flying || state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
                 setState(ElytraState.Inactive, "pressed keybind while flying");
@@ -627,12 +595,14 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
+    // TODO: refactor
     private void smoothLanding(PlayerEntity player, double speedMod) {
         float yaw = MathHelper.wrapDegrees(player.getYaw());
         player.setYaw((float) (yaw + config.autoLandSpeed * speedMod));
         player.setPitch(30f);
     }
 
+    // TODO: refactor
     private void riskyLanding(PlayerEntity player, double speedMod) {
         float pitch = player.getPitch();
         player.setPitch((float) (pitch + config.takeOffPull * speedMod));
