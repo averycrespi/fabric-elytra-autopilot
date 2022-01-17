@@ -31,20 +31,18 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     public ElytraConfig config;
     public ElytraAutoPilot main = this;
     public static ElytraAutoPilot instance;
+    private ElytraState state = ElytraState.Inactive;
 
     public MinecraftClient minecraftClient;
     private static KeyBinding keyBinding;
 
     private boolean keybindingWasPressedOnPreviousTick = false;
 
-    public boolean autoFlightEnabled;
     public boolean isDescending;
     public boolean isPullingUp;
     public boolean isPullingDown;
 
-    private boolean isTakingOff;
     public boolean shouldFlyToAfterTakeoff = false;
-    private boolean doTakeoffCooldown;
     private static final int MAX_TAKEOFF_COOLDOWN = 5;
     private int takeoffCooldown = 0;
 
@@ -53,12 +51,10 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private double velHigh = 0f; // ?
     private double velLow = 0f; // ?
 
-    public boolean isFlyingTo = false;
     public int argXpos;
     public int argZpos;
 
     private double distanceToTarget = 0f;
-    private boolean isLanding = false;
 
     private int ticksSinceDistanceToGroundUpdate = 0;
     public double distanceToGround = 0f;
@@ -105,6 +101,12 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
     }
 
+    public void setState(ElytraState newState, String reason) {
+        System.out.println(
+                String.format("Changing ElytraAutoPilot state from %s to %s because %s", state, newState, reason));
+        state = newState;
+    }
+
     /**
      * Start the takeoff sequence.
      */
@@ -114,7 +116,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             return;
         }
 
-        if (isTakingOff || isFlyingTo || isLanding || autoFlightEnabled) {
+        if (state != ElytraState.Inactive) {
             return;
         }
 
@@ -155,7 +157,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
 
         // Initiate a cooldown so the player has enough time to jump
         minecraftClient.options.keyJump.setPressed(true);
-        doTakeoffCooldown = true;
+        setState(ElytraState.CountingDownToTakeOff, "started takeoff");
     }
 
     private void onScreenTick() // Once every screen frame
@@ -174,7 +176,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         }
 
         // If we're taking off, adjust the angle to look straight up
-        if (isTakingOff) {
+        if (state == ElytraState.TakingOff) {
             float pitch = player.getPitch();
             if (pitch > -90f) {
                 player.setPitch((float) (pitch - config.takeOffPull * speedMod));
@@ -183,7 +185,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 player.setPitch(-90f);
         }
 
-        if (autoFlightEnabled) {
+        if (state == ElytraState.Flying || state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
             // If hotswap is enabled, swap out the elytra if it's nearly broken
             if (config.elytraHotswap) {
                 int elytraDurability = player.getInventory().armor.get(2).getMaxDamage()
@@ -218,61 +220,60 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             }
 
             float pitch = player.getPitch();
-            if (isFlyingTo) {
-                if (isLanding) {
-                    if (!config.autoLanding) {
-                        isFlyingTo = false;
-                        isLanding = false;
-                        return;
-                    }
-                    isDescending = true;
-                    if (config.riskyLanding && distanceToGround > 60) {
-                        if (currentHorizontalVelocity > 0.3f || currentVelocity > 1.0f) { // TODO make it smoother
-                            smoothLanding(player, speedMod);
-                        } else {
-                            riskyLanding(player, speedMod);
-                        }
-                    } else {
+            if (state == ElytraState.Landing) {
+                if (!config.autoLanding) {
+                    setState(ElytraState.Inactive, "auto landing is disabled");
+                    return;
+                }
+                isDescending = true;
+                if (config.riskyLanding && distanceToGround > 60) {
+                    if (currentHorizontalVelocity > 0.3f || currentVelocity > 1.0f) { // TODO make it smoother
                         smoothLanding(player, speedMod);
+                    } else {
+                        riskyLanding(player, speedMod);
                     }
-
                 } else {
-                    // Precondition: we're flying but not landing
-                    Vec3d playerPosition = player.getPos();
-                    double xDifference = (double) argXpos - playerPosition.x;
-                    double zDifference = (double) argZpos - playerPosition.z;
-                    float targetYaw = MathHelper
-                            .wrapDegrees(
-                                    (float) (MathHelper.atan2(zDifference, xDifference) * 57.2957763671875D) - 90.0F);
-                    float yaw = MathHelper.wrapDegrees(player.getYaw());
-                    if (Math.abs(yaw - targetYaw) < config.turningSpeed * 2 * speedMod)
-                        player.setYaw(targetYaw);
-                    else {
-                        if (yaw < targetYaw)
-                            player.setYaw((float) (yaw + config.turningSpeed * speedMod));
-                        if (yaw > targetYaw)
-                            player.setYaw((float) (yaw - config.turningSpeed * speedMod));
-                    }
-                    distanceToTarget = Math.sqrt(xDifference * xDifference + zDifference * zDifference);
+                    smoothLanding(player, speedMod);
+                }
+            } else if (state == ElytraState.FlyingToTarget) {
+                // Precondition: we're flying but not landing
+                Vec3d playerPosition = player.getPos();
+                double xDifference = (double) argXpos - playerPosition.x;
+                double zDifference = (double) argZpos - playerPosition.z;
+                float targetYaw = MathHelper
+                        .wrapDegrees(
+                                (float) (MathHelper.atan2(zDifference, xDifference) * 57.2957763671875D) - 90.0F);
+                float yaw = MathHelper.wrapDegrees(player.getYaw());
+                if (Math.abs(yaw - targetYaw) < config.turningSpeed * 2 * speedMod)
+                    player.setYaw(targetYaw);
+                else {
+                    if (yaw < targetYaw)
+                        player.setYaw((float) (yaw + config.turningSpeed * speedMod));
+                    if (yaw > targetYaw)
+                        player.setYaw((float) (yaw - config.turningSpeed * speedMod));
+                }
+                distanceToTarget = Math.sqrt(xDifference * xDifference + zDifference * zDifference);
 
-                    // If we're close enough, start landing
-                    if (distanceToTarget < 20) {
-                        isLanding = true;
+                // If we're close enough, start landing
+                if (distanceToTarget < 20) {
+                    setState(ElytraState.Landing, "player is close to target");
+                }
+            }
+
+            if (state != ElytraState.Landing) {
+                if (isPullingUp) { // TODO add powered flight
+                    player.setPitch((float) (pitch - config.pullUpSpeed * speedMod));
+                    pitch = player.getPitch();
+                    if (pitch <= config.pullUpAngle) {
+                        player.setPitch((float) config.pullUpAngle);
                     }
                 }
-            }
-            if (isPullingUp && !isLanding) { // TODO add powered flight
-                player.setPitch((float) (pitch - config.pullUpSpeed * speedMod));
-                pitch = player.getPitch();
-                if (pitch <= config.pullUpAngle) {
-                    player.setPitch((float) config.pullUpAngle);
-                }
-            }
-            if (isPullingDown && !isLanding) {
-                player.setPitch((float) (pitch + config.pullDownSpeed * pitchMod * speedMod));
-                pitch = player.getPitch();
-                if (pitch >= config.pullDownAngle) {
-                    player.setPitch((float) config.pullDownAngle);
+                if (isPullingDown) {
+                    player.setPitch((float) (pitch + config.pullDownSpeed * pitchMod * speedMod));
+                    pitch = player.getPitch();
+                    if (pitch >= config.pullDownAngle) {
+                        player.setPitch((float) config.pullDownAngle);
+                    }
                 }
             }
 
@@ -280,8 +281,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             // Precondition: auto-flight is disabled
             velHigh = 0f;
             velLow = 0f;
-            isLanding = false;
-            isFlyingTo = false;
             isPullingUp = false;
             pitchMod = 1f;
             isPullingDown = false;
@@ -311,15 +310,18 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 updateDistanceToGround(player);
             }
         } else {
-            autoFlightEnabled = false;
+            if (state != ElytraState.Inactive && state != ElytraState.TakingOff
+                    && state != ElytraState.CountingDownToTakeOff) {
+                setState(ElytraState.Inactive, "player stopped flying");
+            }
             showHud = false;
             distanceToGround = 0f;
         }
 
         // Optimization: only perform one of the following actions per tick
-        if (doTakeoffCooldown) {
+        if (state == ElytraState.CountingDownToTakeOff) {
             updateTakeoffCooldown();
-        } else if (isTakingOff) {
+        } else if (state == ElytraState.TakingOff) {
             if (distanceToGround > config.minHeight) {
                 endTakeoff(player);
             } else {
@@ -329,7 +331,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                 }
                 useFireworkDuringTakeoff(player);
             }
-        } else if (autoFlightEnabled) {
+        } else if (state == ElytraState.Flying || state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
             updateAutoFlightDuringClientTick(player);
         }
 
@@ -357,9 +359,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
     private void updateAutoFlightDuringClientTick(PlayerEntity player) {
         // TODO: move this into main client tick?
         if (player.isTouchingWater() || player.isInLava()) {
-            isFlyingTo = false;
-            isLanding = false;
-            autoFlightEnabled = false;
+            setState(ElytraState.Inactive, "player touched liquid while flying");
             return;
         }
 
@@ -407,8 +407,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             takeoffCooldown++;
         } else {
             takeoffCooldown = 0;
-            doTakeoffCooldown = false;
-            isTakingOff = true;
+            setState(ElytraState.TakingOff, "finished takeoff countdown");
         }
     }
 
@@ -416,9 +415,6 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
      * End the takeoff sequence.
      */
     private void endTakeoff(PlayerEntity player) {
-        isTakingOff = false;
-        autoFlightEnabled = true;
-
         minecraftClient.options.keyUse.setPressed(false);
         minecraftClient.options.keyJump.setPressed(false);
 
@@ -427,12 +423,14 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
 
         if (shouldFlyToAfterTakeoff) {
             shouldFlyToAfterTakeoff = false;
-            isFlyingTo = true;
             minecraftClient.inGameHud.addChatMessage(
                     MessageType.SYSTEM,
                     new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos)
                             .formatted(Formatting.GREEN),
                     player.getUuid());
+            setState(ElytraState.FlyingToTarget, "finished taking off");
+        } else {
+            setState(ElytraState.Flying, "finished taking off");
         }
     }
 
@@ -448,12 +446,12 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
         boolean isHoldingFirework = (mainHandItem.toString().equals("firework_rocket")
                 || offHandItem.toString().equals("firework_rocket"));
         if (!isHoldingFirework) {
-            isTakingOff = false;
             minecraftClient.options.keyUse.setPressed(false);
             minecraftClient.options.keyJump.setPressed(false);
             player.sendMessage(
                     new TranslatableText("text.elytraautopilot.takeoffAbort.noFirework").formatted(Formatting.RED),
                     true);
+            setState(ElytraState.Inactive, "player does not have firework");
             return;
         }
 
@@ -553,7 +551,9 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
 
         hudString[0] = (BaseText) new TranslatableText("text.elytraautopilot.hud.toggleAutoFlight")
                 .append(new TranslatableText(
-                        autoFlightEnabled ? "text.elytraautopilot.hud.true" : "text.elytraautopilot.hud.false"));
+                        (state == ElytraState.Flying || state == ElytraState.FlyingToTarget
+                                || state == ElytraState.Landing) ? "text.elytraautopilot.hud.true"
+                                        : "text.elytraautopilot.hud.false"));
 
         hudString[1] = new TranslatableText("text.elytraautopilot.hud.altitude",
                 String.format("%.2f", player.getPos().y));
@@ -574,7 +574,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
                     String.format("%.2f", averageHorizontalVelocity * 20));
         }
 
-        if (isFlyingTo) {
+        if (state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
             hudString[6] = new TranslatableText("text.elytraautopilot.flyto", argXpos, argZpos);
             if (distanceToTarget != 0f) {
                 hudString[7] = new TranslatableText("text.elytraautopilot.hud.eta",
@@ -583,7 +583,7 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
             hudString[8] = (BaseText) new TranslatableText("text.elytraautopilot.hud.autoLand")
                     .append(new TranslatableText(config.autoLanding ? "text.elytraautopilot.hud.enabled"
                             : "text.elytraautopilot.hud.disabled"));
-            if (isLanding) {
+            if (state == ElytraState.Landing) {
                 hudString[7] = new TranslatableText("text.elytraautopilot.hud.landing");
             }
         } else {
@@ -613,13 +613,13 @@ public class ElytraAutoPilot implements ModInitializer, net.fabricmc.api.ClientM
      */
     private void handleKeybindingPress(PlayerEntity player) {
         if (player.isFallFlying()) {
-            if (autoFlightEnabled) {
-                autoFlightEnabled = false;
+            if (state == ElytraState.Flying || state == ElytraState.FlyingToTarget || state == ElytraState.Landing) {
+                setState(ElytraState.Inactive, "pressed keybind while flying");
             } else if (distanceToGround < config.minHeight) {
                 player.sendMessage(new TranslatableText("text.elytraautopilot.autoFlightFail.tooLow")
                         .formatted(Formatting.RED), true);
             } else {
-                autoFlightEnabled = true;
+                setState(ElytraState.Flying, "pressed keybind while flying");
                 isDescending = true;
             }
         } else {

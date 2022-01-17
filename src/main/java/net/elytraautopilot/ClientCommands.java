@@ -19,10 +19,9 @@ public class ClientCommands {
                                             if (minecraftClient.player.isFallFlying()) { // If the player is flying
                                                 if (main.distanceToGround > config.minHeight) { // If above required
                                                                                                 // height
-                                                    main.autoFlightEnabled = true;
                                                     main.argXpos = IntegerArgumentType.getInteger(context, "X");
                                                     main.argZpos = IntegerArgumentType.getInteger(context, "Z");
-                                                    main.isFlyingTo = true;
+                                                    main.setState(ElytraState.FlyingToTarget, "started flying to target");
                                                     context.getSource().sendFeedback(new TranslatableText(
                                                             "text.elytraautopilot.flyto", main.argXpos, main.argZpos)
                                                                     .formatted(Formatting.GREEN));
